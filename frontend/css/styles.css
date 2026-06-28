@@ -8430,6 +8430,10 @@ kbd {
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+.behavior-system-prompt {
+    min-height: 260px;
+}
+
 /* Crawl History Status Badges Animation */
 .crawl-status-badge.running::before {
     content: '';

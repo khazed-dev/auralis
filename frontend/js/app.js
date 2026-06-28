@@ -1592,7 +1592,7 @@ function getBehaviorTabContent() {
         <div class="tab-form">
             <div class="form-group">
                 <label for="config-prompt">System Prompt</label>
-                <textarea id="config-prompt" placeholder="You are a helpful assistant..." class="form-textarea" rows="4">${behavior.system_prompt || ''}</textarea>
+                <textarea id="config-prompt" placeholder="You are a helpful assistant..." class="form-textarea behavior-system-prompt" rows="12">${behavior.system_prompt || ''}</textarea>
             </div>
             
             <div class="form-group">
