@@ -220,6 +220,113 @@ async def trigger_crawl_now(
     }
 
 
+@router.post("/api/sites/{site_id}/crawl-new")
+async def trigger_incremental_crawl(
+    site_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user)
+):
+    """Crawl the site but index only URLs that are not already stored."""
+    db = await get_mongodb()
+    site = await db.get_site(site_id)
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    running_job = await db.get_running_crawl_job(site_id)
+    if running_job:
+        raise HTTPException(
+            status_code=409,
+            detail="A crawl is already running for this site"
+        )
+
+    schedule_config = await db.get_crawl_schedule(site_id) or {}
+    job_id = await db.create_scheduled_crawl_job(
+        site_id=site_id,
+        target_url=site.get("url"),
+        trigger="incremental"
+    )
+    background_tasks.add_task(
+        _run_incremental_crawl_background,
+        job_id=job_id,
+        site_url=site.get("url"),
+        site_id=site_id,
+        max_pages=schedule_config.get("max_pages", 50),
+        include_patterns=schedule_config.get("include_patterns", []),
+        exclude_patterns=schedule_config.get("exclude_patterns", [])
+    )
+    return {
+        "success": True,
+        "job_id": job_id,
+        "message": "Incremental crawl started"
+    }
+
+
+async def _run_incremental_crawl_background(
+    job_id: str,
+    site_url: str,
+    site_id: str,
+    max_pages: int,
+    include_patterns: list,
+    exclude_patterns: list
+):
+    """Discover all in-scope pages and index only URLs not seen before."""
+    from bson import ObjectId
+
+    db = await get_mongodb()
+    crawler = CrawlerService()
+    crawler.job_id = job_id
+
+    try:
+        pages = await crawler.crawl(
+            url=site_url,
+            max_pages=max_pages,
+            include_patterns=include_patterns,
+            exclude_patterns=exclude_patterns
+        )
+
+        # URL is the stable page identity in the current schema. Reading the
+        # existing set does not mutate MongoDB or FAISS.
+        existing_urls = set(
+            await db.db.pages.distinct("url", {"status": "indexed"})
+        )
+        new_pages = [
+            page for page in (pages or [])
+            if page.get("url") and page["url"] not in existing_urls
+        ]
+
+        indexed_count = 0
+        if new_pages:
+            indexer = IndexerService()
+            stats = await indexer.index_pages(new_pages, site_id=site_id)
+            indexed_count = stats.get("indexed_pages", 0)
+
+        await db.update_crawl_job(
+            job_id=job_id,
+            status="completed",
+            pages_crawled=len(pages) if pages else 0,
+            pages_indexed=indexed_count
+        )
+        await db.db.crawl_jobs.update_one(
+            {"_id": ObjectId(job_id)},
+            {"$set": {
+                "completed_at": datetime.utcnow(),
+                "pages_discovered": len(pages) if pages else 0,
+                "new_pages_found": len(new_pages)
+            }}
+        )
+        logger.info(
+            f"Incremental crawl {job_id} completed for {site_id}: "
+            f"{len(new_pages)} new, {indexed_count} indexed"
+        )
+    except Exception as e:
+        logger.error(f"Incremental crawl job {job_id} failed: {e}")
+        await db.update_crawl_job(
+            job_id=job_id,
+            status="failed",
+            error=str(e)
+        )
+
+
 async def _run_crawl_background(
     job_id: str,
     site_url: str,

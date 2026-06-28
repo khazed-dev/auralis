@@ -396,7 +396,9 @@ function setupEventListeners() {
     document.getElementById('copy-detail-embed')?.addEventListener('click', copyDetailEmbed);
     document.getElementById('detail-get-embed-btn')?.addEventListener('click', () => switchToDetailTab('embed'));
     document.getElementById('detail-breadcrumb-sites')?.addEventListener('click', navigateDetailBreadcrumbSites);
-    document.getElementById('recrawl-site')?.addEventListener('click', recrawlSite);
+    document.querySelectorAll('.crawl-new-pages').forEach(button => {
+        button.addEventListener('click', crawlNewPages);
+    });
     document.getElementById('delete-site')?.addEventListener('click', deleteSite);
     
     // Source type selection
@@ -1330,10 +1332,9 @@ async function openSiteDetails(site) {
 }
 
 function setupQuickActions() {
-    const recrawlBtn = document.getElementById('recrawl-site');
-    if (recrawlBtn) {
-        recrawlBtn.onclick = recrawlSite;
-    }
+    document.querySelectorAll('.crawl-new-pages').forEach(button => {
+        button.onclick = crawlNewPages;
+    });
     
     const addDocsBtn = document.getElementById('add-documents-btn');
     if (addDocsBtn) {
@@ -2318,29 +2319,43 @@ async function copyDetailEmbed() {
     }
 }
 
-async function recrawlSite() {
+async function crawlNewPages(event) {
     if (!currentDetailSite) return;
-    
-    const btn = document.getElementById('recrawl-site');
-    btn.disabled = true;
-    btn.textContent = 'Crawling...';
-    
+    const siteId = currentDetailSite.site_id;
+
+    const buttons = document.querySelectorAll('.crawl-new-pages');
+    buttons.forEach(button => {
+        button.disabled = true;
+    });
+    const clickedButton = event?.currentTarget;
+    const originalHtml = clickedButton?.innerHTML;
+    if (clickedButton) clickedButton.textContent = 'Đang tìm trang mới...';
+
     try {
-        await fetch(`${API_BASE}/crawl`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ url: currentDetailSite.url, max_pages: 50 })
-        });
-        
+        const response = await fetch(
+            `${API_BASE}/sites/${siteId}/crawl-new`,
+            {
+                method: 'POST',
+                headers: getAuthHeaders()
+            }
+        );
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(result.detail || 'Không thể bắt đầu crawl');
+        }
+
+        alert('Đã bắt đầu crawl. Hệ thống chỉ embedding những URL chưa có.');
         closeDetailsModal();
         await loadSites();
-        pollSiteStatus(currentDetailSite.site_id);
+        pollSiteStatus(siteId);
     } catch (error) {
-        console.error('Failed to recrawl:', error);
-        alert('Failed to start crawl. Please try again.');
+        console.error('Failed to crawl new pages:', error);
+        alert(error.message || 'Không thể bắt đầu crawl trang mới.');
     } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>Re-crawl';
+        buttons.forEach(button => {
+            button.disabled = false;
+        });
+        if (clickedButton && originalHtml) clickedButton.innerHTML = originalHtml;
     }
 }
 
