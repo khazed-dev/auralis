@@ -58,7 +58,36 @@
     customBrandingUrl: null,
   };
 
-  const sessionId = "widget-" + Math.random().toString(36).substring(2, 15);
+  const CHAT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+  const CHAT_HISTORY_LIMIT = 50;
+  const storageKeyPrefix = "sitechat:" + config.siteId + ":";
+  const sessionStorageKey = storageKeyPrefix + "session";
+  const historyStorageKey = storageKeyPrefix + "history";
+
+  function createSessionId() {
+    return "widget-" + Math.random().toString(36).substring(2, 15);
+  }
+
+  function saveSession(id, expiresAt) {
+    try {
+      localStorage.setItem(sessionStorageKey, JSON.stringify({ id, expiresAt }));
+    } catch (error) { }
+  }
+
+  function loadOrCreateSession() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(sessionStorageKey) || "null");
+      if (saved && saved.id && Number(saved.expiresAt) > Date.now()) {
+        return saved.id;
+      }
+      localStorage.removeItem(historyStorageKey);
+    } catch (error) { }
+    const id = createSessionId();
+    saveSession(id, Date.now() + CHAT_SESSION_TTL_MS);
+    return id;
+  }
+
+  let sessionId = loadOrCreateSession();
 
   const handoffState = {
     mode: "ai",
@@ -661,6 +690,28 @@
   });
   const messageInput = widgetRoot["querySelector"](".sitechat-input");
   if (messageInput) messageInput["placeholder"] = "Nhập nội dung cần tư vấn...";
+  const newChatButton = document["createElement"]("button");
+  newChatButton["type"] = "button";
+  newChatButton["className"] = "sitechat-new-chat-btn";
+  newChatButton["title"] = "Bắt đầu cuộc trò chuyện mới";
+  newChatButton["setAttribute"]("aria-label", "Bắt đầu cuộc trò chuyện mới");
+  newChatButton["innerHTML"] = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>';
+  Object["assign"](newChatButton["style"], {
+    width: "36px",
+    height: "36px",
+    border: "none",
+    background: "rgba(255, 255, 255, 0.2)",
+    borderRadius: "8px",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: "0",
+    color: "white"
+  });
+  const headerActions = widgetRoot["querySelector"](".sitechat-header-actions");
+  const existingHandoffButton = widgetRoot["querySelector"](".sitechat-handoff-btn");
+  if (headerActions) headerActions["insertBefore"](newChatButton, existingHandoffButton);
   const toggleBtn = widgetRoot["querySelector"](".sitechat-toggle"),
     windowEl = widgetRoot["querySelector"](".sitechat-window"),
     messagesEl = widgetRoot["querySelector"](".sitechat-messages"),
@@ -669,6 +720,7 @@
     sendBtn = widgetRoot["querySelector"](".sitechat-send"),
     handoffBtn = widgetRoot["querySelector"](".sitechat-handoff-btn"),
     headerCloseBtn = widgetRoot["querySelector"](".sitechat-header-close");
+  const initialWelcomeHtml = messagesEl["innerHTML"];
   function isMobileViewport() {
     try {
       return window.matchMedia("(max-width: 900px)").matches;
@@ -708,6 +760,80 @@
     passive: true
   })), scheduleMobileViewportOffsets();
   let chatOpen = false, welcomeRemoved = false, lastMessageIndex = -1;
+
+  function persistMessage(content, role, sources, timestamp) {
+    try {
+      const expiresAt = Date.now() + CHAT_SESSION_TTL_MS;
+      const stored = JSON.parse(localStorage.getItem(historyStorageKey) || "null");
+      const messages = stored && stored.sessionId === sessionId && Array.isArray(stored.messages)
+        ? stored.messages
+        : [];
+      messages.push({
+        content: String(content || "").slice(0, 12000),
+        role,
+        sources: Array.isArray(sources) ? sources.slice(0, 5).map(source => ({
+          title: String(source && source.title || "").slice(0, 300),
+          url: String(source && source.url || "").slice(0, 2000)
+        })) : [],
+        timestamp
+      });
+      localStorage.setItem(historyStorageKey, JSON.stringify({
+        sessionId,
+        expiresAt,
+        messages: messages.slice(-CHAT_HISTORY_LIMIT)
+      }));
+      saveSession(sessionId, expiresAt);
+    } catch (error) { }
+  }
+
+  function restoreChatHistory() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(historyStorageKey) || "null");
+      if (!stored || stored.sessionId !== sessionId || Number(stored.expiresAt) <= Date.now() || !Array.isArray(stored.messages) || !stored.messages.length) {
+        return;
+      }
+      messagesEl["innerHTML"] = "";
+      welcomeRemoved = true;
+      stored.messages.slice(-CHAT_HISTORY_LIMIT).forEach(message => {
+        if ((message.role === "user" || message.role === "bot") && message.content) {
+          appendMessage(message.content, message.role, message.sources || [], {
+            persist: false,
+            timestamp: message.timestamp
+          });
+        }
+      });
+    } catch (error) { }
+  }
+
+  function startNewConversation() {
+    const hasMessages = Boolean(messagesEl["querySelector"](".sitechat-message-wrapper"));
+    if (hasMessages && !window["confirm"]("Bắt đầu cuộc trò chuyện mới? Lịch sử hiện tại sẽ được xóa.")) {
+      return;
+    }
+    handoff["stopPolling"]();
+    handoff["clearHandoffLocal"]();
+    try {
+      localStorage.removeItem(historyStorageKey);
+      localStorage.removeItem(sessionStorageKey);
+    } catch (error) { }
+    sessionId = createSessionId();
+    saveSession(sessionId, Date.now() + CHAT_SESSION_TTL_MS);
+    messagesEl["innerHTML"] = initialWelcomeHtml;
+    welcomeRemoved = false;
+    lastMessageIndex = -1;
+    handoffState.mode = "ai";
+    handoffState.handoffId = null;
+    const header = widgetRoot["querySelector"](".sitechat-header");
+    if (header) header["classList"]["remove"]("handoff-mode");
+    if (headerSubtitle) headerSubtitle["textContent"] = "Trợ lý tư vấn AI";
+    if (handoffBtn) handoffBtn["style"]["display"] = "";
+    inputEl["disabled"] = false;
+    inputEl["value"] = "";
+    sendBtn["disabled"] = true;
+    inputEl["focus"]();
+  }
+
+  newChatButton["addEventListener"]("click", startNewConversation);
   toggleBtn["addEventListener"]("click", () => {
     const wasOpen = chatOpen;
     chatOpen = !chatOpen;
@@ -801,7 +927,7 @@
         H["remove"]();
       }), messagesEl["appendChild"](H), messagesEl["scrollTop"] = messagesEl["scrollHeight"];
   }
-  function appendMessage(G, H, I = []) {
+  function appendMessage(G, H, I = [], options = {}) {
     lastMessageIndex++;
     const msgIndex = lastMessageIndex, K = document["createElement"]("div");
     K["className"] = "sitechat-message-wrapper " + H;
@@ -818,7 +944,8 @@
     config.showSources && I && I["length"] > 0 && (P += '\n        <div class="sitechat-sources">\n          <div class="sitechat-sources-label">\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>\n              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>\n            </svg>\n            Nguồn tham khảo\n          </div>\n          <div class="sitechat-sources-list">\n            ' + I["map"](R => '\n              <a href="' + R["url"] + '" target="_blank" class="sitechat-source-link" title="' + R["url"] + '">\n                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>\n                  <polyline points="15 3 21 3 21 9"/>\n                  <line x1="10" y1="14" x2="21" y2="3"/>\n                </svg>\n                ' + (R["title"] || "Nguồn") + "\n              </a>\n            ")["join"]("") + "\n          </div>\n        </div>\n      ");
     N["innerHTML"] = P, M["appendChild"](N);
     const Q = document["createElement"]("div");
-    Q["className"] = "sitechat-message-time", Q["textContent"] = (new Date)["toLocaleTimeString"]([], {
+    const messageTime = options.timestamp ? new Date(options.timestamp) : new Date();
+    Q["className"] = "sitechat-message-time", Q["textContent"] = messageTime["toLocaleTimeString"]([], {
       hour: "2-digit",
       minute: "2-digit"
     }), M["appendChild"](Q);
@@ -828,6 +955,9 @@
         M["appendChild"](R);
     }
     K["appendChild"](L), K["appendChild"](M), messagesEl["appendChild"](K), messagesEl["scrollTop"] = messagesEl["scrollHeight"];
+    if (options.persist !== false) {
+      persistMessage(G, H, I, messageTime["toISOString"]());
+    }
   }
   function markdownToHtml(G) {
     let H = G["replace"](/\*\*(.*?)\*\*/g, "<strong>$1</strong>")["replace"](/`([^`]+)`/g, "<code>$1</code>")["split"]("\n\n")["map"](I => I["trim"]())["filter"](I => I)["map"](I => {
@@ -852,4 +982,5 @@
     return I["className"] = "sitechat-typing", I["innerHTML"] = "<span></span><span></span><span></span>", G["appendChild"](H),
       G["appendChild"](I), messagesEl["appendChild"](G), messagesEl["scrollTop"] = messagesEl["scrollHeight"], G;
   }
+  restoreChatHistory();
 })();
