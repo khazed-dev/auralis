@@ -396,9 +396,6 @@ function setupEventListeners() {
     document.getElementById('copy-detail-embed')?.addEventListener('click', copyDetailEmbed);
     document.getElementById('detail-get-embed-btn')?.addEventListener('click', () => switchToDetailTab('embed'));
     document.getElementById('detail-breadcrumb-sites')?.addEventListener('click', navigateDetailBreadcrumbSites);
-    document.querySelectorAll('.crawl-new-pages').forEach(button => {
-        button.addEventListener('click', crawlNewPages);
-    });
     document.getElementById('delete-site')?.addEventListener('click', deleteSite);
     
     // Source type selection

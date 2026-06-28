@@ -44,7 +44,7 @@ async def _execute_crawl_job(
     
     try:
         pages = await crawler.crawl(
-            url=site_url,
+            start_url=site_url,
             max_pages=max_pages,
             include_patterns=include_patterns,
             exclude_patterns=exclude_patterns
@@ -52,7 +52,8 @@ async def _execute_crawl_job(
         
         if pages:
             indexer = IndexerService()
-            indexed_count = await indexer.index_pages(pages, site_id=site_id)
+            stats = await indexer.index_pages(pages, site_id=site_id)
+            indexed_count = stats.get("indexed_pages", 0)
             
             await db.update_crawl_job(
                 job_id=job_id,
@@ -61,8 +62,9 @@ async def _execute_crawl_job(
                 pages_indexed=indexed_count
             )
             
+            from bson import ObjectId
             await db.db.crawl_jobs.update_one(
-                {"_id": db.db.crawl_jobs.find_one({"_id": job_id})},
+                {"_id": ObjectId(job_id)},
                 {"$set": {"completed_at": datetime.utcnow()}}
             )
         else:
@@ -278,7 +280,7 @@ async def _run_incremental_crawl_background(
 
     try:
         pages = await crawler.crawl(
-            url=site_url,
+            start_url=site_url,
             max_pages=max_pages,
             include_patterns=include_patterns,
             exclude_patterns=exclude_patterns
@@ -344,7 +346,7 @@ async def _run_crawl_background(
     
     try:
         pages = await crawler.crawl(
-            url=site_url,
+            start_url=site_url,
             max_pages=max_pages,
             include_patterns=include_patterns,
             exclude_patterns=exclude_patterns
@@ -353,7 +355,8 @@ async def _run_crawl_background(
         indexed_count = 0
         if pages:
             indexer = IndexerService()
-            indexed_count = await indexer.index_pages(pages, site_id=site_id)
+            stats = await indexer.index_pages(pages, site_id=site_id)
+            indexed_count = stats.get("indexed_pages", 0)
         
         await db.update_crawl_job(
             job_id=job_id,
