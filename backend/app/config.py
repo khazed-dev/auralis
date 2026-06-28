@@ -225,8 +225,8 @@ class Settings(BaseSettings):
     # ===========================================
     MAX_PAGES: int = 100
     CRAWL_DELAY: float = 1.0
-    INCREMENTAL_SCAN_MAX_PAGES: int = 1000
-    INCREMENTAL_MAX_NEW_PAGES: int = 100
+    INCREMENTAL_SCAN_MAX_PAGES: int = 500
+    INCREMENTAL_MAX_NEW_PAGES: int = 50
     
     # ===========================================
     # Rate limiting
