@@ -98,6 +98,9 @@ class MongoDB:
         await self.db.subscription_audit_logs.create_index(
             [("owner_id", 1), ("created_at", -1)]
         )
+        await self.db.subscription_upgrade_requests.create_index(
+            [("owner_id", 1), ("status", 1), ("created_at", -1)]
+        )
     
     # ==================== Conversations ====================
     
