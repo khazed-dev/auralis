@@ -288,7 +288,7 @@ export function SettingsModule() {
                     <label>Phụ đề<input name="login_subtitle" defaultValue={branding.login_subtitle} /></label>
                     <label className="wide">Nội dung chân trang<input name="footer_text" defaultValue={branding.footer_text || ""} /></label>
                   </div>
-                  <label className="settings-checkbox"><input name="hide_sitechat_branding" type="checkbox" defaultChecked={branding.hide_sitechat_branding} /><span>Ẩn toàn bộ nhận diện mặc định của SiteChat</span></label>
+                  <label className="settings-checkbox"><input name="hide_sitechat_branding" type="checkbox" defaultChecked={branding.hide_sitechat_branding} /><span>Ẩn toàn bộ nhận diện mặc định của Auralis AI</span></label>
                 </div>
                 <footer><button type="button" onClick={() => void resetBranding()}>Khôi phục mặc định</button><button className="sites-primary-button" disabled={saving}>{saving ? "Đang lưu..." : "Lưu thương hiệu"}</button></footer>
               </form>

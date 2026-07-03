@@ -1,3 +1,3 @@
 """
-SiteChat - A RAG-based chatbot for your website.
+Auralis AI - A RAG-based chatbot platform for your website.
 """

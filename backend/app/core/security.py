@@ -1,5 +1,5 @@
 """
-Security utilities and middleware for the SiteChat application.
+Security utilities and middleware for the Auralis AI application.
 """
 import re
 import secrets

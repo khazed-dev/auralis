@@ -1,5 +1,5 @@
 """
-SiteChat - FastAPI Application
+Auralis AI - FastAPI Application
 
 A production-ready RAG chatbot platform with configurable providers.
 
