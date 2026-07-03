@@ -10,6 +10,7 @@ from loguru import logger
 from datetime import datetime
 import hashlib
 import json
+from urllib.parse import urlparse
 
 from app.config import settings
 from app.database import get_mongodb
@@ -58,7 +59,7 @@ def get_widget_sri_hash() -> Optional[str]:
     # Find the widget script path
     backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     project_root = os.path.dirname(backend_dir)
-    widget_path = os.path.join(project_root, "frontend", "widget", "chatbot.js")
+    widget_path = os.path.join(project_root, "widget", "dist", "chatbot.js")
     
     if not os.path.exists(widget_path):
         logger.warning(f"Widget script not found at: {widget_path}")
@@ -77,15 +78,29 @@ def get_widget_sri_hash() -> Optional[str]:
 
 def get_embed_url(request: Optional[Request] = None) -> str:
     """Get the base URL for embed scripts."""
-    # Prefer configured URL from env; derive from request when available.
+    # SITE_URL must be one public origin, not the comma-separated CORS list.
     configured = (settings.SITE_URL or "").rstrip("/")
-    if configured:
+    parsed = urlparse(configured)
+    if (
+        configured
+        and "," not in configured
+        and parsed.scheme in {"http", "https"}
+        and bool(parsed.netloc)
+    ):
         return configured
 
     if request:
-        # Use the request's scheme and host
+        if configured:
+            logger.warning(
+                "Ignoring invalid SITE_URL=%r; deriving the public URL from the request",
+                configured,
+            )
+        # Reverse proxies should forward these headers to preserve the public origin.
         scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
         host = request.headers.get("x-forwarded-host", request.url.netloc)
+        # Only use the first value if a proxy appended forwarding metadata.
+        scheme = scheme.split(",", 1)[0].strip()
+        host = host.split(",", 1)[0].strip()
         return f"{scheme}://{host}"
     
     # Fallback for development
@@ -221,7 +236,7 @@ async def setup_chatbot(
 <script>
 (function() {{
   var s = document.createElement('script');
-  s.src = '{api_url}/widget/chatbot.js';
+  s.src = '{api_url}/chatbot.js';
   s.async = true;
   s.integrity = '{sri_hash}';
   s.crossOrigin = 'anonymous';
@@ -235,7 +250,7 @@ async def setup_chatbot(
 <script>
 (function() {{
   var s = document.createElement('script');
-  s.src = '{api_url}/widget/chatbot.js';
+  s.src = '{api_url}/chatbot.js';
   s.async = true;
   s.dataset.siteId = '{site_id}';
   s.dataset.apiUrl = '{api_url}';
@@ -309,7 +324,7 @@ async def get_embed_script(
 <script>
 (function() {{
   var s = document.createElement('script');
-  s.src = '{api_url}/widget/chatbot.js';
+  s.src = '{api_url}/chatbot.js';
   s.async = true;
   s.integrity = '{sri_hash}';
   s.crossOrigin = 'anonymous';
@@ -323,7 +338,7 @@ async def get_embed_script(
 <script>
 (function() {{
   var s = document.createElement('script');
-  s.src = '{api_url}/widget/chatbot.js';
+  s.src = '{api_url}/chatbot.js';
   s.async = true;
   s.dataset.siteId = '{site_id}';
   s.dataset.apiUrl = '{api_url}';
@@ -363,7 +378,7 @@ async def get_widget_security_info(
     return {
         "site_id": site_id,
         "api_url": api_url,
-        "widget_url": f"{api_url}/widget/chatbot.js",
+        "widget_url": f"{api_url}/chatbot.js",
         "sri_hash": sri_hash,
         "allowed_domains": security_config.get("allowed_domains", []),
         "enforce_domain_validation": security_config.get("enforce_domain_validation", False),

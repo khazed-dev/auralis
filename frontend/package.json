@@ -1,10 +1,8 @@
 {
-  "name": "sitechat-widget",
+  "name": "auralis-legacy-frontend",
   "version": "1.0.0",
-  "description": "SiteChat embeddable chatbot widget",
+  "description": "Legacy Auralis AI HTML frontend retained during the Next.js migration",
   "scripts": {
-    "build": "node build.js",
-    "build:watch": "nodemon --watch src -e js --exec 'npm run build'",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"
@@ -13,9 +11,7 @@
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",
     "jest": "^29.7.0",
-    "jest-environment-jsdom": "^29.7.0",
-    "javascript-obfuscator": "^4.1.1",
-    "terser": "^5.31.0"
+    "jest-environment-jsdom": "^29.7.0"
   },
   "private": true
 }

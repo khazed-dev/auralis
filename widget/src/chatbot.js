@@ -1,5 +1,5 @@
 /**
- * SiteChat embeddable widget — source for build.js.
+ * Auralis AI embeddable widget — source for build.js.
  * Edit here, then run: npm run build
  */
 (function () {
