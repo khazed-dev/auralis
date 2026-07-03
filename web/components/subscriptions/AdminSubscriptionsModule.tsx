@@ -22,6 +22,7 @@ type Audit = {
   id: string; action: string; plan?: string; status?: string; note?: string;
   created_at: string;
 };
+type Promo = { id: string; code: string; percent_off: number; active: boolean; redemptions: number; max_redemptions?: number | null };
 
 const resourceLabels: Record<string, string> = {
   sites: "Website", members: "Thành viên", messages: "Tin nhắn", crawl_pages: "Trang crawl",
@@ -39,14 +40,17 @@ export function AdminSubscriptionsModule() {
   const [history, setHistory] = useState<Audit[]>([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [promos, setPromos] = useState<Promo[]>([]);
 
   const load = useCallback(async () => {
-    const [accountsResponse, requestsResponse] = await Promise.all([
+    const [accountsResponse, requestsResponse, promosResponse] = await Promise.all([
       authFetch(`${API_BASE}/subscriptions/admin`),
       authFetch(`${API_BASE}/subscriptions/admin/requests`),
+      authFetch(`${API_BASE}/checkout/promos`),
     ]);
     if (accountsResponse.ok) setRows((await accountsResponse.json()) as Row[]);
     if (requestsResponse.ok) setRequests((await requestsResponse.json()) as UpgradeRequest[]);
+    if (promosResponse.ok) setPromos((await promosResponse.json()) as Promo[]);
   }, []);
   useEffect(() => {
     const frame = requestAnimationFrame(() => void load());
@@ -93,11 +97,30 @@ export function AdminSubscriptionsModule() {
     setMessage(decision === "approved" ? "Đã duyệt và áp dụng gói mới." : "Đã từ chối yêu cầu.");
     await load();
   }
+  async function createPromo(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const response = await authFetch(`${API_BASE}/checkout/promos`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code: form.get("code"), percent_off: Number(form.get("percent_off")),
+        max_redemptions: form.get("max_redemptions") ? Number(form.get("max_redemptions")) : null,
+        active: true,
+      }),
+    });
+    if (!response.ok) { setError(await detail(response, "Không thể tạo promo.")); return; }
+    event.currentTarget.reset(); setMessage("Đã tạo mã giảm giá."); await load();
+  }
 
   return <main className="dashboard-content subscription-page">
     <div className="dashboard-page-heading"><div><h1>Quản lý Subscription</h1><p>Kiểm soát gói, hạn mức, usage và yêu cầu nâng cấp.</p></div></div>
     {message && <p className="subscription-notice">{message}</p>}
     {error && <p className="subscription-error">{error}</p>}
+    <section className="subscription-admin-section promo-admin">
+      <header><div><h2>Mã giảm giá</h2><p>Tạo promo theo phần trăm, bao gồm mã 100% để kiểm thử checkout.</p></div></header>
+      <form onSubmit={createPromo}><input name="code" placeholder="Mã promo" required minLength={3} /><input name="percent_off" type="number" min={1} max={100} placeholder="% giảm" required /><input name="max_redemptions" type="number" min={1} placeholder="Số lượt (tùy chọn)" /><button className="sites-primary-button">Tạo promo</button></form>
+      <div className="promo-list">{promos.map(promo => <span key={promo.id}><b>{promo.code}</b> Giảm {promo.percent_off}% · {promo.redemptions}/{promo.max_redemptions ?? "∞"} lượt · {promo.active ? "Đang bật" : "Đã tắt"}</span>)}</div>
+    </section>
 
     <section className="subscription-admin-section">
       <header><div><h2>Yêu cầu nâng cấp</h2><p>{requests.filter((item) => item.status === "pending").length} yêu cầu đang chờ xử lý</p></div></header>

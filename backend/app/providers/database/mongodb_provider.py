@@ -108,6 +108,8 @@ class MongoDBProvider(BaseDatabaseProvider):
                 [("owner_id", 1), ("period", 1), ("provider", 1), ("model", 1)],
                 unique=True,
             )
+            await self.db.promo_codes.create_index("code", unique=True)
+            await self.db.checkout_orders.create_index("order_id", unique=True)
             logger.info("MongoDB indexes created")
         except Exception as e:
             logger.warning(f"Index creation warning: {e}")
