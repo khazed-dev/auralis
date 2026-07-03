@@ -10,5 +10,6 @@ from .triggers import router as triggers_router
 from .handoff import router as handoff_router
 from .platform import router as platform_router
 from .subscriptions import router as subscriptions_router
+from .byok import router as byok_router
 
-__all__ = ["chat_router", "crawl_router", "admin_router", "analytics_router", "conversations_router", "triggers_router", "handoff_router", "platform_router", "subscriptions_router"]
+__all__ = ["chat_router", "crawl_router", "admin_router", "analytics_router", "conversations_router", "triggers_router", "handoff_router", "platform_router", "subscriptions_router", "byok_router"]

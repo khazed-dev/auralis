@@ -8,12 +8,13 @@ from slowapi.util import get_remote_address
 from loguru import logger
 
 from app.models.schemas import ChatRequest, ChatResponse, ConversationHistory, Message
-from app.services.rag_engine import get_rag_engine
+from app.services.rag_engine import RAGEngine, get_rag_engine
 from app.database import get_mongodb
 from app.config import settings
 from app.core.security import get_client_ip
 from app.routes.dependencies import require_widget_site
 from app.services.subscriptions import enforce_quota, increment_usage
+from app.services.byok import record_model_usage, tenant_llm_for_site
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 
@@ -73,7 +74,8 @@ async def chat(request: Request, body: ChatRequest):
         owner_id = str(site.get("user_id") or "")
         if owner_id:
             await enforce_quota(mongodb, owner_id, "messages")
-        rag_engine = get_rag_engine()
+        tenant_llm = await tenant_llm_for_site(mongodb, site)
+        rag_engine = RAGEngine(llm_service=tenant_llm) if tenant_llm else get_rag_engine()
 
         response = await rag_engine.chat(
             message=body.message,
@@ -92,6 +94,7 @@ async def chat(request: Request, body: ChatRequest):
         response.handoff_reason = handoff_reason
         if owner_id:
             await increment_usage(mongodb, owner_id, "messages")
+            await record_model_usage(mongodb, owner_id, tenant_llm)
         
         return response
         
@@ -116,7 +119,8 @@ async def chat_stream(request: Request, body: ChatRequest):
         owner_id = str(site.get("user_id") or "")
         if owner_id:
             await enforce_quota(mongodb, owner_id, "messages")
-        rag_engine = get_rag_engine()
+        tenant_llm = await tenant_llm_for_site(mongodb, site)
+        rag_engine = RAGEngine(llm_service=tenant_llm) if tenant_llm else get_rag_engine()
 
         async def event_generator():
             try:
@@ -129,6 +133,7 @@ async def chat_stream(request: Request, body: ChatRequest):
                     yield f"data: {chunk}\n\n"
                 if owner_id:
                     await increment_usage(mongodb, owner_id, "messages")
+                    await record_model_usage(mongodb, owner_id, tenant_llm)
                 yield "data: [DONE]\n\n"
             except Exception as e:
                 yield f"data: Error: {str(e)}\n\n"

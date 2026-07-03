@@ -177,6 +177,8 @@ class Settings(BaseSettings):
     PLATFORM_ADMIN_EMAIL: str = ""
     PLATFORM_ADMIN_PASSWORD: str = ""
     PLATFORM_ADMIN_NAME: str = "Auralis Platform Admin"
+    # Dedicated secret used to encrypt tenant BYOK credentials at rest.
+    BYOK_ENCRYPTION_KEY: str = ""
     
     # Password policy
     MIN_PASSWORD_LENGTH: int = 8

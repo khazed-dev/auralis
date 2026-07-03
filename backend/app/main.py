@@ -33,7 +33,7 @@ from app.core.security import (
     log_security_warnings,
     get_client_ip
 )
-from app.routes import chat_router, crawl_router, admin_router, analytics_router, conversations_router, triggers_router, handoff_router, platform_router, subscriptions_router
+from app.routes import chat_router, crawl_router, admin_router, analytics_router, conversations_router, triggers_router, handoff_router, platform_router, subscriptions_router, byok_router
 from app.routes.embed import router as embed_router
 from app.routes.sites import router as sites_router
 from app.routes.auth import router as auth_router
@@ -217,6 +217,7 @@ app.include_router(triggers_router)
 app.include_router(handoff_router)
 app.include_router(platform_router)
 app.include_router(subscriptions_router)
+app.include_router(byok_router)
 app.include_router(embed_router)
 app.include_router(sites_router)
 app.include_router(documents_router)
