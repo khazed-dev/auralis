@@ -16,8 +16,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse
-from typing import Optional
+from fastapi.responses import FileResponse
 from datetime import datetime
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -35,8 +34,7 @@ from app.core.security import (
     get_client_ip
 )
 from app.routes import chat_router, crawl_router, admin_router, analytics_router, conversations_router, triggers_router, handoff_router, platform_router
-from app.routes.embed import router as embed_router, get_widget_sri_hash
-from app.public_html import apply_public_html_placeholders
+from app.routes.embed import router as embed_router
 from app.routes.sites import router as sites_router
 from app.routes.auth import router as auth_router
 from app.routes.documents import router as documents_router
@@ -226,33 +224,15 @@ app.include_router(leads_router)
 app.include_router(messenger_router)
 if settings.ENABLE_PUBLIC_DATA_EXPLORER:
     app.include_router(public_data_router)
-# Serve static files (frontend)
-# Get the absolute path to the frontend directory
+# Serve the independently built embeddable widget.
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 project_root = os.path.dirname(backend_dir)
-frontend_path = os.path.join(project_root, "frontend")
 widget_dist_path = os.path.join(project_root, "widget", "dist")
 
-logger.info(f"Frontend path: {frontend_path}")
-
-def _html_file_response(filename: str, *, widget_sri: Optional[str] = None) -> HTMLResponse:
-    path = os.path.join(frontend_path, filename)
-    with open(path, "r", encoding="utf-8") as f:
-        body = apply_public_html_placeholders(f.read(), widget_sri=widget_sri)
-    return HTMLResponse(content=body, media_type="text/html; charset=utf-8")
-
-
-if os.path.exists(frontend_path):
-    # Mount CSS and JS directories
-    css_path = os.path.join(frontend_path, "css")
-    js_path = os.path.join(frontend_path, "js")
-    
-    if os.path.exists(css_path):
-        app.mount("/css", StaticFiles(directory=css_path), name="css")
-    if os.path.exists(js_path):
-        app.mount("/js", StaticFiles(directory=js_path), name="js")
-    if os.path.exists(widget_dist_path):
-        app.mount("/widget", StaticFiles(directory=widget_dist_path), name="widget")
+if os.path.exists(widget_dist_path):
+    app.mount("/widget", StaticFiles(directory=widget_dist_path), name="widget")
+else:
+    logger.warning(f"Widget build directory not found: {widget_dist_path}")
 
 
 @app.get("/chatbot.js", include_in_schema=False)
@@ -266,34 +246,21 @@ async def chatbot_script():
 
 @app.get("/")
 async def root():
-    """Serve marketing landing page, or dashboard fallback if landing missing."""
-    landing_path = os.path.join(frontend_path, "landing.html")
-    if os.path.exists(landing_path):
-        return _html_file_response("landing.html", widget_sri=get_widget_sri_hash())
-
-    frontend_index = os.path.join(frontend_path, "index.html")
-    logger.info(f"Looking for index.html at: {frontend_index}")
-    if os.path.exists(frontend_index):
-        return FileResponse(frontend_index)
-
+    """Backend service information. The customer-facing UI is served by Next.js."""
     return {
         "name": settings.APP_NAME,
         "version": "1.0.0",
         "status": "running",
         "docs": "/api/docs",
-        "frontend_path": frontend_path,
-        "exists": os.path.exists(frontend_path),
+        "widget": "/chatbot.js",
     }
 
 
 @app.get("/app")
 @app.get("/dashboard")
 async def dashboard_app():
-    """Serve authenticated SPA dashboard."""
-    frontend_index = os.path.join(frontend_path, "index.html")
-    if os.path.exists(frontend_index):
-        return _html_file_response("index.html")
-    return {"error": "Dashboard not found"}
+    """Legacy UI route retained only as an explicit migration response."""
+    raise HTTPException(status_code=410, detail="UI moved to the Next.js application")
 
 
 @app.get("/demo")
@@ -305,29 +272,20 @@ async def demo_page():
 
 @app.get("/landing-neo")
 async def landing_neo_page():
-    """Serve the neobrutalism landing page variant."""
-    path = os.path.join(frontend_path, "landing-neo.html")
-    if os.path.exists(path):
-        return FileResponse(path)
-    return {"error": "Page not found"}
+    """Retired legacy landing-page variant."""
+    raise HTTPException(status_code=410, detail="Legacy page retired")
 
 
 @app.get("/login")
 async def login_page():
-    """Serve the login page."""
-    login_path = os.path.join(frontend_path, "login.html")
-    if os.path.exists(login_path):
-        return _html_file_response("login.html")
-    return {"error": "Login page not found"}
+    """Legacy login route retained only as an explicit migration response."""
+    raise HTTPException(status_code=410, detail="UI moved to the Next.js application")
 
 
 @app.get("/data")
 async def public_data_page():
-    """Serve the public, read-only crawl data explorer."""
-    data_path = os.path.join(frontend_path, "data.html")
-    if os.path.exists(data_path):
-        return _html_file_response("data.html")
-    return {"error": "Data page not found"}
+    """Retired legacy public data page."""
+    raise HTTPException(status_code=410, detail="Legacy page retired")
 
 
 @app.get("/api")
