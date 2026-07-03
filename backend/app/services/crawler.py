@@ -76,7 +76,23 @@ class CrawlerService:
         
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30),
-            headers={"User-Agent": "SiteChat-Crawler/1.0"}
+            headers={
+                # A number of otherwise public sites return a bot-block page or
+                # an empty shell to custom crawler user agents. Use normal
+                # browser navigation headers while retaining crawl limits,
+                # delays, response-size caps, and SSRF validation.
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/126.0.0.0 Safari/537.36 AuralisBot/1.0"
+                ),
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "image/avif,image/webp,*/*;q=0.8"
+                ),
+                "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+                "Cache-Control": "no-cache",
+            }
         ) as session:
             while queue and len(self.pages) < max_pages:
                 if self.job_id:

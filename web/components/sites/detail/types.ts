@@ -67,4 +67,5 @@ export type CrawlHistory = {
   started_at?: string;
   completed_at?: string | null;
   duration_seconds?: number | null;
+  errors?: string[];
 };
