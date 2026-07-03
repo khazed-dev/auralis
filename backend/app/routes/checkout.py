@@ -1,5 +1,5 @@
 """Public checkout stub, promo management, and zero-value account provisioning."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import secrets
 from typing import Literal, Optional
 
@@ -92,15 +92,23 @@ async def complete_checkout(body: CheckoutRequest):
     ), role=UserRole.USER)
     if not user:
         raise HTTPException(status_code=409, detail="Không thể tạo tài khoản")
-    owner_id = str(user["_id"])
+    # AuthService returns the provider UUID after insertion; tenant ownership elsewhere
+    # uses the persisted Mongo _id, so reload the document before creating subscription data.
+    persisted_user = await db.get_user_by_id(str(user.get("user_id") or user["_id"]))
+    if not persisted_user:
+        raise HTTPException(status_code=500, detail="Không thể tải tài khoản vừa tạo")
+    owner_id = str(persisted_user["_id"])
+    provider_user_id = str(persisted_user.get("user_id") or user.get("user_id"))
     now = datetime.now(timezone.utc)
+    trial_ends_at = now + timedelta(days=7)
     order_id = f"AUR-{now.strftime('%y%m%d')}-{secrets.token_hex(3).upper()}"
     try:
         await db.db.subscriptions.update_one(
             {"owner_id": owner_id},
             {"$set": {
-                "owner_id": owner_id, "plan": body.plan, "status": "active",
-                "custom_limits": {}, "started_at": now, "updated_at": now,
+                "owner_id": owner_id, "plan": "starter", "status": "trialing",
+                "custom_limits": {}, "started_at": now, "expires_at": trial_ends_at,
+                "trial_ends_at": trial_ends_at, "updated_at": now,
             }, "$setOnInsert": {"created_at": now}},
             upsert=True,
         )
@@ -117,10 +125,11 @@ async def complete_checkout(body: CheckoutRequest):
                 {"_id": pricing["promo"]["_id"]}, {"$inc": {"redemptions": 1}}
             )
     except Exception:
-        await db.delete_user(owner_id)
+        await db.db.users.delete_one({"user_id": provider_user_id})
         raise
     return {
-        "order_id": order_id, "plan": body.plan, "email": str(body.email).lower(),
+        "order_id": order_id, "plan": "starter", "requested_plan": body.plan,
+        "trial_ends_at": trial_ends_at, "email": str(body.email).lower(),
         "password": password, "payment_method": body.payment_method, "total": pricing["total"],
     }
 
