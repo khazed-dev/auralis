@@ -5,6 +5,7 @@ from typing import Literal, Optional
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
+from pymongo import ReturnDocument
 
 from app.database import get_mongodb
 from app.routes.auth import require_account_admin, require_auth
@@ -35,6 +36,23 @@ class SubscriptionUpdate(BaseModel):
         return value
 
 
+class UpgradeRequestCreate(BaseModel):
+    requested_plan: Literal["starter", "growth", "business", "custom"]
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+class UpgradeDecision(BaseModel):
+    decision: Literal["approved", "rejected"]
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+def serialize_document(document: dict) -> dict:
+    result = dict(document)
+    if "_id" in result:
+        result["id"] = str(result.pop("_id"))
+    return result
+
+
 @router.get("/plans")
 async def list_plans():
     return [{"key": key, **value} for key, value in PLAN_CATALOG.items() if key != "legacy"]
@@ -44,6 +62,50 @@ async def list_plans():
 async def my_subscription(user: dict = Depends(require_auth)):
     db = await get_mongodb()
     return await subscription_summary(db, await resolve_owner_id(db, user))
+
+
+@router.get("/requests/me")
+async def my_upgrade_requests(user: dict = Depends(require_auth)):
+    db = await get_mongodb()
+    owner_id = await resolve_owner_id(db, user)
+    rows = await db.db.subscription_upgrade_requests.find(
+        {"owner_id": owner_id}
+    ).sort("created_at", -1).to_list(length=50)
+    return [serialize_document(row) for row in rows]
+
+
+@router.post("/requests", status_code=201)
+async def create_upgrade_request(
+    request: UpgradeRequestCreate,
+    user: dict = Depends(require_auth),
+):
+    if user.get("role") != "user":
+        raise HTTPException(status_code=403, detail="Only website owners can request an upgrade")
+    db = await get_mongodb()
+    owner_id = str(user["_id"])
+    current = await subscription_summary(db, owner_id)
+    if current["plan"]["key"] == request.requested_plan:
+        raise HTTPException(status_code=400, detail="You are already using this plan")
+    pending = await db.db.subscription_upgrade_requests.find_one(
+        {"owner_id": owner_id, "status": "pending"}
+    )
+    if pending:
+        raise HTTPException(status_code=409, detail="An upgrade request is already pending")
+    now = datetime.now(timezone.utc)
+    document = {
+        "owner_id": owner_id,
+        "owner_email": user.get("email"),
+        "owner_name": user.get("name"),
+        "current_plan": current["plan"]["key"],
+        "requested_plan": request.requested_plan,
+        "status": "pending",
+        "note": request.note,
+        "created_at": now,
+        "updated_at": now,
+    }
+    result = await db.db.subscription_upgrade_requests.insert_one(document)
+    document["_id"] = result.inserted_id
+    return serialize_document(document)
 
 
 @router.get("/admin")
@@ -66,6 +128,90 @@ async def admin_subscriptions(_admin: dict = Depends(require_account_admin)):
     return result
 
 
+@router.get("/admin/requests")
+async def admin_upgrade_requests(
+    status: Optional[Literal["pending", "approved", "rejected"]] = None,
+    _admin: dict = Depends(require_account_admin),
+):
+    db = await get_mongodb()
+    query = {"status": status} if status else {}
+    rows = await db.db.subscription_upgrade_requests.find(query).sort(
+        "created_at", -1
+    ).to_list(length=500)
+    return [serialize_document(row) for row in rows]
+
+
+@router.get("/admin/{owner_id}/history")
+async def subscription_history(
+    owner_id: str,
+    _admin: dict = Depends(require_account_admin),
+):
+    db = await get_mongodb()
+    rows = await db.db.subscription_audit_logs.find(
+        {"owner_id": owner_id}
+    ).sort("created_at", -1).to_list(length=200)
+    return [serialize_document(row) for row in rows]
+
+
+@router.patch("/admin/requests/{request_id}")
+async def decide_upgrade_request(
+    request_id: str,
+    decision: UpgradeDecision,
+    admin: dict = Depends(require_account_admin),
+):
+    db = await get_mongodb()
+    try:
+        query = {"_id": ObjectId(request_id)}
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request ID")
+    now = datetime.now(timezone.utc)
+    actor_id = str(admin["_id"])
+    upgrade = await db.db.subscription_upgrade_requests.find_one_and_update(
+        {**query, "status": "pending"},
+        {"$set": {
+            "status": decision.decision,
+            "decision_note": decision.note,
+            "decided_by": actor_id,
+            "decided_at": now,
+            "updated_at": now,
+        }},
+        return_document=ReturnDocument.BEFORE,
+    )
+    if not upgrade:
+        existing = await db.db.subscription_upgrade_requests.find_one(query)
+        if existing:
+            raise HTTPException(status_code=409, detail="Upgrade request was already processed")
+        raise HTTPException(status_code=404, detail="Upgrade request not found")
+    if decision.decision == "approved":
+        await db.db.subscriptions.update_one(
+            {"owner_id": upgrade["owner_id"]},
+            {
+                "$set": {
+                    "owner_id": upgrade["owner_id"],
+                    "plan": upgrade["requested_plan"],
+                    "status": "active",
+                    "custom_limits": {},
+                    "updated_at": now,
+                    "updated_by": actor_id,
+                },
+                "$setOnInsert": {"started_at": now, "created_at": now},
+            },
+            upsert=True,
+        )
+    await db.db.subscription_audit_logs.insert_one({
+        "owner_id": upgrade["owner_id"],
+        "actor_id": actor_id,
+        "action": f"upgrade_request_{decision.decision}",
+        "from_plan": upgrade.get("current_plan"),
+        "plan": upgrade.get("requested_plan"),
+        "request_id": request_id,
+        "note": decision.note,
+        "created_at": now,
+    })
+    updated = await db.db.subscription_upgrade_requests.find_one(query)
+    return serialize_document(updated)
+
+
 @router.put("/admin/{owner_id}")
 async def update_subscription(
     owner_id: str,
@@ -82,6 +228,7 @@ async def update_subscription(
         raise HTTPException(status_code=404, detail="Owner account not found")
 
     now = datetime.now(timezone.utc)
+    previous = await db.db.subscriptions.find_one({"owner_id": owner_id}) or {}
     payload = update.model_dump(exclude={"note"})
     payload.update({"owner_id": owner_id, "updated_at": now, "updated_by": str(admin["_id"])})
     await db.db.subscriptions.update_one(
@@ -93,8 +240,11 @@ async def update_subscription(
         "owner_id": owner_id,
         "actor_id": str(admin["_id"]),
         "action": "subscription_updated",
+        "previous_plan": previous.get("plan", "legacy"),
+        "previous_status": previous.get("status", "active"),
         "plan": update.plan,
         "status": update.status,
+        "expires_at": update.expires_at,
         "custom_limits": update.custom_limits,
         "note": update.note,
         "created_at": now,

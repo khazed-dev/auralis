@@ -100,6 +100,9 @@ class MongoDBProvider(BaseDatabaseProvider):
             await self.db.subscription_audit_logs.create_index(
                 [("owner_id", 1), ("created_at", -1)]
             )
+            await self.db.subscription_upgrade_requests.create_index(
+                [("owner_id", 1), ("status", 1), ("created_at", -1)]
+            )
             logger.info("MongoDB indexes created")
         except Exception as e:
             logger.warning(f"Index creation warning: {e}")
