@@ -16,6 +16,28 @@ type Request = { id: string; requested_plan: string; status: string; note?: stri
 const labels: Record<string, string> = {
   sites: "Website", members: "Thành viên", messages: "Tin nhắn AI", crawl_pages: "Trang crawl",
 };
+const planPresentation: Record<string, {
+  title: string; price: string; suffix?: string; badge?: string; action: string; features: string[];
+}> = {
+  starter: {
+    title: "Khởi đầu", price: "Miễn phí", action: "Chọn gói Khởi đầu",
+    features: ["1 website", "1.000 hội thoại AI mỗi tháng", "Lập chỉ mục 100 trang", "1 thành viên"],
+  },
+  growth: {
+    title: "Tăng trưởng", price: "2,4 triệu", suffix: "VNĐ/tháng", badge: "Phổ biến nhất",
+    action: "Chọn gói Tăng trưởng",
+    features: ["5 website", "10.000 hội thoại AI mỗi tháng", "Lập chỉ mục 2.000 trang", "5 thành viên và handoff"],
+  },
+  business: {
+    title: "Doanh nghiệp", price: "9,8 triệu", suffix: "VNĐ/tháng",
+    action: "Liên hệ tư vấn",
+    features: ["20 website", "100.000 hội thoại AI mỗi tháng", "Lập chỉ mục 20.000 trang", "20 thành viên và hỗ trợ ưu tiên"],
+  },
+  custom: {
+    title: "Tùy chỉnh", price: "Linh hoạt", action: "Liên hệ triển khai",
+    features: ["Kết nối API model riêng", "Tự chọn nhà cung cấp AI", "Hạn mức theo nhu cầu", "Hỗ trợ cấu hình và triển khai"],
+  },
+};
 
 export function SubscriptionModule() {
   const [data, setData] = useState<Summary | null>(null);
@@ -85,10 +107,25 @@ export function SubscriptionModule() {
 
     {requestOpen && data && <div className="sites-modal-layer">
       <button className="sites-modal-backdrop" onClick={() => setRequestOpen(false)} aria-label="Đóng" />
-      <section className="sites-modal subscription-modal" role="dialog" aria-modal="true">
+      <section className="sites-modal subscription-modal subscription-upgrade-modal" role="dialog" aria-modal="true">
         <div className="sites-modal-header"><div><h2>Yêu cầu nâng cấp</h2><p>Gói hiện tại: {data.plan.name}</p></div><button onClick={() => setRequestOpen(false)}>×</button></div>
         <form onSubmit={submitRequest}>
-          <div className="subscription-plan-options">{plans.filter((plan) => plan.key !== data.plan.key).map((plan) => <label key={plan.key}><input type="radio" name="requested_plan" value={plan.key} required /><span><strong>{plan.name}</strong><small>{Object.entries(plan.limits).map(([key, limit]) => `${labels[key]}: ${limit ?? "∞"}`).join(" · ")}</small></span></label>)}</div>
+          <div className="subscription-plan-options">{plans.map((plan) => {
+            const view = planPresentation[plan.key] || {
+              title: plan.name, price: "Liên hệ", action: `Chọn ${plan.name}`, features: [],
+            };
+            const current = plan.key === data.plan.key;
+            return <label className={`subscription-plan-card ${plan.key === "growth" ? "featured" : ""} ${current ? "current" : ""}`} key={plan.key}>
+              {view.badge && <span className="subscription-plan-badge">{view.badge}</span>}
+              <input type="radio" name="requested_plan" value={plan.key} required disabled={current} />
+              <span className="subscription-plan-card-body">
+                <strong className="subscription-plan-name">{view.title}</strong>
+                <span className="subscription-plan-price">{view.price} {view.suffix && <small>{view.suffix}</small>}</span>
+                <span className="subscription-plan-features">{view.features.map((feature) => <span key={feature}><b>✓</b>{feature}</span>)}</span>
+                <span className="subscription-plan-action">{current ? "Gói hiện tại" : view.action}</span>
+              </span>
+            </label>;
+          })}</div>
           <label>Lời nhắn<textarea name="note" rows={4} placeholder="Nhu cầu hoặc thông tin thanh toán..." /></label>
           <div className="sites-modal-actions"><button type="button" onClick={() => setRequestOpen(false)}>Hủy</button><button className="sites-primary-button">Gửi yêu cầu</button></div>
         </form>

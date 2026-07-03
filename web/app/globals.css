@@ -6131,11 +6131,27 @@ pre,
 .subscription-history article { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; padding: 12px 0; border-bottom: 1px solid #f1f5f9; }
 .subscription-history article time { color: #64748b; font-size: 13px; }
 .subscription-history article p { grid-column: 1 / -1; margin: 2px 0 0; color: #64748b; }
-.subscription-plan-options { display: grid; gap: 12px; padding: 20px; }
-.subscription-plan-options label { display: flex; align-items: flex-start; gap: 12px; padding: 16px; border: 1px solid #e2e8f0; border-radius: 12px; cursor: pointer; }
-.subscription-plan-options label:has(input:checked) { border-color: #2f8bff; background: #eff6ff; }
-.subscription-plan-options span { display: grid; gap: 5px; }
-.subscription-plan-options small { color: #64748b; line-height: 1.5; }
+.subscription-upgrade-modal { width: min(1240px, calc(100vw - 32px)); }
+.subscription-plan-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; padding: 28px 24px; }
+.subscription-plan-card { position: relative; display: block; min-height: 460px; padding: 0; overflow: visible; border: 1px solid #dbe3ef; border-radius: 22px; background: #fff; cursor: pointer; transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease; }
+.subscription-plan-card:hover:not(.current) { transform: translateY(-4px); border-color: #8ab9ff; box-shadow: 0 18px 36px rgba(15, 40, 90, .1); }
+.subscription-plan-card.featured { border: 2px solid #2f8bff; box-shadow: 0 18px 42px rgba(47, 139, 255, .12); }
+.subscription-plan-card.current { cursor: default; background: #f8fafc; }
+.subscription-plan-card > input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.subscription-plan-card:has(input:checked) { border-color: #7a35ff; box-shadow: 0 0 0 3px rgba(122, 53, 255, .14), 0 20px 45px rgba(47, 139, 255, .14); transform: translateY(-4px); }
+.subscription-plan-badge { position: absolute; top: -17px; left: 50%; z-index: 2; transform: translateX(-50%); padding: 8px 20px; border-radius: 999px; background: #2f8bff; color: #fff; font-size: 14px; font-weight: 700; white-space: nowrap; }
+.subscription-plan-card-body { display: flex; height: 100%; flex-direction: column; padding: 34px 28px 24px; }
+.subscription-plan-name { color: #091c66; font-size: 22px; }
+.subscription-plan-price { display: flex; min-height: 74px; align-items: baseline; gap: 7px; margin-top: 18px; color: #091c66; font-size: clamp(34px, 3vw, 48px); font-weight: 800; line-height: 1.05; letter-spacing: -.04em; }
+.subscription-plan-price small { color: #334155; font-size: 13px; font-weight: 500; letter-spacing: 0; white-space: nowrap; }
+.subscription-plan-features { display: grid; gap: 14px; margin: 18px 0 28px; color: #172554; font-size: 15px; line-height: 1.35; }
+.subscription-plan-features > span { display: grid; grid-template-columns: 18px 1fr; gap: 8px; }
+.subscription-plan-features b { color: #12a99c; }
+.subscription-plan-action { display: flex; min-height: 48px; align-items: center; justify-content: center; margin-top: auto; padding: 11px 14px; border: 1px solid #cbd5e1; border-radius: 10px; color: #091c66; font-weight: 700; text-align: center; }
+.subscription-plan-card.featured .subscription-plan-action { border: 0; background: linear-gradient(135deg, #12d6c7, #2f8bff 55%, #7a35ff); color: #fff; }
+.subscription-plan-card.current .subscription-plan-action { background: #e2e8f0; color: #64748b; }
 .subscription-modal form > label { margin: 0 20px 20px; }
 @media (max-width: 760px) { .subscription-hero { align-items: flex-start; flex-direction: column; } .quota-grid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .subscription-form-grid { grid-template-columns: 1fr; } .subscription-form-grid .wide { grid-column: auto; } }
+@media (max-width: 1050px) { .subscription-plan-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) { .subscription-plan-options { grid-template-columns: 1fr; padding-inline: 16px; } .subscription-plan-card { min-height: 400px; } }
