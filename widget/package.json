@@ -1,0 +1,13 @@
+{
+  "name": "auralis-widget",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Auralis AI embeddable chatbot widget",
+  "scripts": {
+    "build": "node build.js",
+    "build:watch": "nodemon --watch src -e js --exec \"npm run build\""
+  },
+  "devDependencies": {
+    "javascript-obfuscator": "^4.1.1"
+  }
+}

@@ -59,7 +59,7 @@ def get_widget_sri_hash() -> Optional[str]:
     # Find the widget script path
     backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     project_root = os.path.dirname(backend_dir)
-    widget_path = os.path.join(project_root, "frontend", "widget", "chatbot.js")
+    widget_path = os.path.join(project_root, "widget", "dist", "chatbot.js")
     
     if not os.path.exists(widget_path):
         logger.warning(f"Widget script not found at: {widget_path}")

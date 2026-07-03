@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Build script for SiteChat Widget
+ * Build script for the Auralis AI Widget
  * Obfuscates and minifies the chatbot widget for production use
  */
 
@@ -8,8 +8,8 @@ const fs = require('fs');
 const path = require('path');
 const JavaScriptObfuscator = require('javascript-obfuscator');
 
-const SRC_DIR = path.join(__dirname, 'src', 'widget');
-const DIST_DIR = path.join(__dirname, 'widget');
+const SRC_DIR = path.join(__dirname, 'src');
+const DIST_DIR = path.join(__dirname, 'dist');
 
 const obfuscatorOptions = {
     compact: true,
@@ -42,7 +42,7 @@ const obfuscatorOptions = {
 };
 
 function buildWidget() {
-    console.log('🔨 Building SiteChat Widget...\n');
+    console.log('Building Auralis AI Widget...\n');
 
     // Ensure dist directory exists
     if (!fs.existsSync(DIST_DIR)) {
@@ -54,8 +54,8 @@ function buildWidget() {
     
     if (!fs.existsSync(srcFile)) {
         console.error('❌ Widget source missing:', srcFile);
-        console.error('   Edit and commit frontend/src/widget/chatbot.js in this repo, then re-run build.');
-        console.error('   The files in frontend/widget/ are build output only.');
+        console.error('   Edit and commit widget/src/chatbot.js, then re-run build.');
+        console.error('   The files in widget/dist/ are build output only.');
         process.exit(1);
     }
 
@@ -65,8 +65,8 @@ function buildWidget() {
 
     // Add banner comment
     const banner = `/**
- * SiteChat Widget v1.0.0
- * (c) ${new Date().getFullYear()} SiteChat. All rights reserved.
+ * Auralis AI Widget v1.0.0
+ * (c) ${new Date().getFullYear()} Auralis AI. All rights reserved.
  * This code is proprietary and confidential.
  * Unauthorized copying, modification, or distribution is strictly prohibited.
  * 
@@ -108,9 +108,9 @@ function buildWidget() {
 
     console.log('\n✅ Build complete!\n');
     console.log('Files generated:');
-    console.log('  - widget/chatbot.js     (fully obfuscated - production)');
-    console.log('  - widget/chatbot.min.js (minified only - debugging)');
-    console.log('\nSource files are in: src/widget/');
+    console.log('  - dist/chatbot.js     (fully obfuscated - production)');
+    console.log('  - dist/chatbot.min.js (minified only - debugging)');
+    console.log('\nSource files are in: src/');
 }
 
 // Run build

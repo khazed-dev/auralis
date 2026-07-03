@@ -143,11 +143,30 @@ npm run dev
 
 Web app mặc định có tại `http://localhost:3000`.
 
+### 3. Chat widget
+
+Widget được quản lý độc lập với frontend legacy:
+
+```bash
+cd widget
+npm install
+npm run build
+```
+
+Mã nguồn nằm tại `widget/src/chatbot.js`; bản dùng cho production được tạo tại
+`widget/dist/chatbot.js`. Backend phục vụ cùng một file qua `/chatbot.js` và
+`/widget/chatbot.js` để giữ tương thích với các website đã nhúng trước đó.
+
 ## Kiểm tra trước khi triển khai
 
 ```bash
 cd web
 npm run lint
+npm run build
+```
+
+```bash
+cd widget
 npm run build
 ```
 

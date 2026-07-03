@@ -231,6 +231,7 @@ if settings.ENABLE_PUBLIC_DATA_EXPLORER:
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 project_root = os.path.dirname(backend_dir)
 frontend_path = os.path.join(project_root, "frontend")
+widget_dist_path = os.path.join(project_root, "widget", "dist")
 
 logger.info(f"Frontend path: {frontend_path}")
 
@@ -245,20 +246,19 @@ if os.path.exists(frontend_path):
     # Mount CSS and JS directories
     css_path = os.path.join(frontend_path, "css")
     js_path = os.path.join(frontend_path, "js")
-    widget_path = os.path.join(frontend_path, "widget")
     
     if os.path.exists(css_path):
         app.mount("/css", StaticFiles(directory=css_path), name="css")
     if os.path.exists(js_path):
         app.mount("/js", StaticFiles(directory=js_path), name="js")
-    if os.path.exists(widget_path):
-        app.mount("/widget", StaticFiles(directory=widget_path), name="widget")
+    if os.path.exists(widget_dist_path):
+        app.mount("/widget", StaticFiles(directory=widget_dist_path), name="widget")
 
 
 @app.get("/chatbot.js", include_in_schema=False)
 async def chatbot_script():
     """Serve the widget at a stable, brand-neutral root URL."""
-    path = os.path.join(frontend_path, "widget", "chatbot.js")
+    path = os.path.join(widget_dist_path, "chatbot.js")
     if os.path.exists(path):
         return FileResponse(path, media_type="application/javascript")
     raise HTTPException(status_code=404, detail="Widget script not found")
