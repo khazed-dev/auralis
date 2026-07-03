@@ -65,6 +65,37 @@ export async function refreshSession(): Promise<DashboardUser | null> {
   return data.user;
 }
 
+export async function authFetch(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> {
+  let token = localStorage.getItem("token");
+  const headers = new Headers(init.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  let response = await fetch(input, {
+    ...init,
+    credentials: "include",
+    headers,
+  });
+  if (response.status !== 401 || hasDevSession()) return response;
+
+  const refreshed = await refreshSession();
+  if (!refreshed) {
+    clearSession();
+    return response;
+  }
+
+  token = localStorage.getItem("token");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  response = await fetch(input, {
+    ...init,
+    credentials: "include",
+    headers,
+  });
+  return response;
+}
+
 export async function getCurrentUser(): Promise<DashboardUser | null> {
   if (hasDevSession()) return getStoredUser() ?? DEV_USER;
 

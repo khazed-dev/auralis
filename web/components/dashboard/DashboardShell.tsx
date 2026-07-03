@@ -63,6 +63,54 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     return () => cancelAnimationFrame(frame);
   }, [pathname, router]);
 
+  useEffect(() => {
+    let prefix = "";
+    let prefixTimer: ReturnType<typeof setTimeout> | null = null;
+    function handleShortcut(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.matches("input, textarea, select") ||
+        target?.isContentEditable ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey
+      ) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === ",") {
+        event.preventDefault();
+        router.push("/dashboard/settings");
+        return;
+      }
+      if (key === "g") {
+        prefix = "g";
+        if (prefixTimer) clearTimeout(prefixTimer);
+        prefixTimer = setTimeout(() => {
+          prefix = "";
+        }, 1200);
+        return;
+      }
+      if (prefix === "g") {
+        const destinations: Record<string, string> = {
+          s: "/dashboard/sites",
+          c: "/dashboard/conversations",
+          h: "/dashboard/handoffs",
+        };
+        if (destinations[key]) {
+          event.preventDefault();
+          router.push(destinations[key]);
+        }
+        prefix = "";
+      }
+    }
+    window.addEventListener("keydown", handleShortcut);
+    return () => {
+      window.removeEventListener("keydown", handleShortcut);
+      if (prefixTimer) clearTimeout(prefixTimer);
+    };
+  }, [router]);
+
   function toggleCollapsed() {
     const next = !collapsed;
     setCollapsed(next);
