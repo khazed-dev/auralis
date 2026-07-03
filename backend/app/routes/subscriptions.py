@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from app.database import get_mongodb
-from app.routes.auth import require_admin, require_auth
+from app.routes.auth import require_account_admin, require_auth
 from app.services.subscriptions import (
     PLAN_CATALOG,
     resolve_owner_id,
@@ -47,7 +47,7 @@ async def my_subscription(user: dict = Depends(require_auth)):
 
 
 @router.get("/admin")
-async def admin_subscriptions(_admin: dict = Depends(require_admin)):
+async def admin_subscriptions(_admin: dict = Depends(require_account_admin)):
     db = await get_mongodb()
     users = await db.db.users.find({"role": "user"}).sort("created_at", -1).to_list(length=1000)
     result = []
@@ -70,7 +70,7 @@ async def admin_subscriptions(_admin: dict = Depends(require_admin)):
 async def update_subscription(
     owner_id: str,
     update: SubscriptionUpdate,
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_account_admin),
 ):
     db = await get_mongodb()
     try:

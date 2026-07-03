@@ -174,6 +174,9 @@ class Settings(BaseSettings):
     # Set ADMIN_PASSWORD to empty string to disable auto-creation
     ADMIN_EMAIL: str = "admin@example.com"
     ADMIN_PASSWORD: str = ""
+    PLATFORM_ADMIN_EMAIL: str = ""
+    PLATFORM_ADMIN_PASSWORD: str = ""
+    PLATFORM_ADMIN_NAME: str = "Auralis Platform Admin"
     
     # Password policy
     MIN_PASSWORD_LENGTH: int = 8

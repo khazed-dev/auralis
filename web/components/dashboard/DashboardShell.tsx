@@ -27,6 +27,7 @@ const utilityNav = [
 ];
 
 const roleLabels = {
+  platform_admin: "Quản trị nền tảng",
   admin: "Quản trị viên",
   user: "Chủ website",
   agent: "Nhân viên hỗ trợ",
@@ -54,6 +55,13 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           return;
         }
         setUser(currentUser);
+        if (
+          currentUser.role === "platform_admin" &&
+          !pathname.startsWith("/dashboard/admin/subscriptions") &&
+          pathname !== "/dashboard/team"
+        ) {
+          router.replace("/dashboard/admin/subscriptions");
+        }
         if (currentUser.role === "agent" && pathname === "/dashboard/sites") {
           router.replace("/dashboard/handoffs");
         }
@@ -132,9 +140,10 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     );
   }
 
-  const navItems = primaryNav.filter(
-    (item) => !(item.hideForAgent && user?.role === "agent"),
-  );
+  const navItems = user?.role === "platform_admin"
+    ? [{ label: "Khách hàng", href: "/dashboard/team", icon: "users" as IconName }]
+    : primaryNav.filter((item) => !(item.hideForAgent && user?.role === "agent"));
+  const visibleUtilityNav = user?.role === "platform_admin" ? [] : utilityNav;
   const initial = (user?.name || user?.email || "A").charAt(0).toUpperCase();
 
   return (
@@ -146,7 +155,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       />
       <aside className={`dashboard-sidebar ${mobileOpen ? "is-open" : ""}`}>
         <div className="dashboard-brand">
-          <Link href="/dashboard/sites" aria-label="Auralis">
+          <Link href={user?.role === "platform_admin" ? "/dashboard/admin/subscriptions" : "/dashboard/sites"} aria-label="Auralis">
             <Image src="/logo-auralis.png" alt="Auralis" width={140} height={48} priority />
           </Link>
           <button
@@ -176,7 +185,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
         <div className="dashboard-sidebar-footer">
           <nav className="dashboard-nav dashboard-utility-nav">
-            {user?.role === "admin" && (
+            {(user?.role === "platform_admin" || user?.role === "admin") && (
               <Link
                 className={pathname === "/dashboard/admin/subscriptions" ? "active" : ""}
                 href="/dashboard/admin/subscriptions"
@@ -186,7 +195,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 <span>Quản lý gói</span>
               </Link>
             )}
-            {utilityNav.map((item) => (
+            {visibleUtilityNav.map((item) => (
               <Link
                 className={pathname === item.href ? "active" : ""}
                 href={item.href}

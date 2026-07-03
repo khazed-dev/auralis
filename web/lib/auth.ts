@@ -2,7 +2,7 @@ export type DashboardUser = {
   id: string;
   email: string;
   name?: string | null;
-  role: "admin" | "user" | "agent";
+  role: "platform_admin" | "admin" | "user" | "agent";
   assigned_site_ids?: string[];
   must_change_password?: boolean;
 };
