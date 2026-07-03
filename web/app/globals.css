@@ -6155,3 +6155,14 @@ pre,
 @media (max-width: 760px) { .subscription-form-grid { grid-template-columns: 1fr; } .subscription-form-grid .wide { grid-column: auto; } }
 @media (max-width: 1050px) { .subscription-plan-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 620px) { .subscription-plan-options { grid-template-columns: 1fr; padding-inline: 16px; } .subscription-plan-card { min-height: 400px; } }
+.byok-section { display: grid; gap: 16px; padding: 24px; border: 1px solid #dbe3ef; border-radius: 18px; background: #fff; }
+.byok-section > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.byok-section h2 { margin: 0 0 5px; font-size: 22px; }
+.byok-section header p { margin: 0; color: #64748b; }
+.byok-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 20px; border-radius: 14px; background: #f8fafc; }
+.byok-form label { display: grid; gap: 7px; color: #334155; font-weight: 600; }
+.byok-form input, .byok-form select { width: 100%; padding: 11px 12px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; font: inherit; }
+.byok-form .byok-toggle { display: flex; align-items: center; grid-column: 1 / -1; flex-direction: row; }
+.byok-form .byok-toggle input { width: 18px; height: 18px; }
+.byok-form > button { width: max-content; grid-column: 1 / -1; }
+@media (max-width: 700px) { .byok-form { grid-template-columns: 1fr; } .byok-form .byok-toggle, .byok-form > button { grid-column: auto; } }

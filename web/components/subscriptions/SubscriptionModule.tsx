@@ -12,6 +12,14 @@ type Summary = {
 };
 type Plan = { key: string; name: string; limits: Record<string, number | null> };
 type Request = { id: string; requested_plan: string; status: string; note?: string; created_at: string };
+type ByokConfig = {
+  configured: boolean; provider?: string; model?: string; base_url?: string;
+  enabled?: boolean; has_api_key?: boolean;
+};
+type ModelUsage = {
+  id: string; period: string; provider: string; model: string;
+  calls: number; input_tokens: number; output_tokens: number; total_tokens: number;
+};
 
 const labels: Record<string, string> = {
   sites: "Website", members: "Thành viên", messages: "Tin nhắn AI", crawl_pages: "Trang crawl",
@@ -44,6 +52,8 @@ export function SubscriptionModule() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [requests, setRequests] = useState<Request[]>([]);
   const [requestOpen, setRequestOpen] = useState(false);
+  const [byok, setByok] = useState<ByokConfig | null>(null);
+  const [modelUsage, setModelUsage] = useState<ModelUsage[]>([]);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const user = getStoredUser();
@@ -55,9 +65,17 @@ export function SubscriptionModule() {
       authFetch(`${API_BASE}/subscriptions/requests/me`),
     ]);
     if (!summaryResponse.ok) throw new Error("Không thể tải thông tin gói");
-    setData((await summaryResponse.json()) as Summary);
+    const summary = (await summaryResponse.json()) as Summary;
+    setData(summary);
     if (plansResponse.ok) setPlans((await plansResponse.json()) as Plan[]);
     if (requestsResponse.ok) setRequests((await requestsResponse.json()) as Request[]);
+    if (summary.plan.key === "custom") {
+      const [configResponse, usageResponse] = await Promise.all([
+        authFetch(`${API_BASE}/byok`), authFetch(`${API_BASE}/byok/usage`),
+      ]);
+      if (configResponse.ok) setByok((await configResponse.json()) as ByokConfig);
+      if (usageResponse.ok) setModelUsage((await usageResponse.json()) as ModelUsage[]);
+    }
   }, []);
   useEffect(() => {
     const frame = requestAnimationFrame(() => void load().catch((reason: Error) => setError(reason.message)));
@@ -79,6 +97,26 @@ export function SubscriptionModule() {
     setMessage("Yêu cầu nâng cấp đã được gửi tới quản trị viên.");
     setRequestOpen(false);
     await load();
+  }
+
+  async function saveByok(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const response = await authFetch(`${API_BASE}/byok`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: form.get("provider"), model: form.get("model"),
+        api_key: form.get("api_key") || null, base_url: form.get("base_url") || null,
+        enabled: form.get("enabled") === "on",
+      }),
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { detail?: string };
+      setError(typeof body.detail === "string" ? body.detail : "Không thể lưu cấu hình BYOK.");
+      return;
+    }
+    setByok((await response.json()) as ByokConfig);
+    setMessage("Đã mã hóa và lưu cấu hình model riêng.");
   }
 
   return <main className="dashboard-content subscription-page">
@@ -103,6 +141,20 @@ export function SubscriptionModule() {
           {requests.length ? requests.map((request) => <tr key={request.id}><td><strong>{request.requested_plan}</strong></td><td>{new Date(request.created_at).toLocaleString("vi-VN")}</td><td>{request.note || "—"}</td><td><span className={`subscription-status ${request.status}`}>{request.status}</span></td></tr>) : <tr><td colSpan={4}>Chưa có yêu cầu nâng cấp.</td></tr>}
         </tbody></table></div>
       </section>
+      {data.plan.key === "custom" && <section className="byok-section">
+        <header><div><h2>Model API riêng</h2><p>Khóa API được mã hóa trước khi lưu và không thể xem lại.</p></div><span className={`subscription-status ${byok?.configured ? "active" : "pending"}`}>{byok?.configured ? "Đã cấu hình" : "Chưa cấu hình"}</span></header>
+        <form className="byok-form" key={`${byok?.provider}-${byok?.model}-${byok?.base_url}`} onSubmit={saveByok}>
+          <label>Nhà cung cấp<select name="provider" defaultValue={byok?.provider || "openai"}><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Google Gemini</option><option value="ollama">Ollama</option></select></label>
+          <label>Model<input name="model" defaultValue={byok?.model || ""} placeholder="Ví dụ: gpt-4.1-mini" required /></label>
+          <label>API key<input name="api_key" type="password" autoComplete="new-password" placeholder={byok?.has_api_key ? "Để trống để giữ khóa hiện tại" : "Nhập API key"} /></label>
+          <label>Base URL<input name="base_url" type="url" defaultValue={byok?.base_url || ""} placeholder="Để trống để dùng endpoint mặc định" /></label>
+          <label className="byok-toggle"><input name="enabled" type="checkbox" defaultChecked={byok?.enabled ?? true} /> Kích hoạt model riêng</label>
+          <button className="sites-primary-button">Lưu cấu hình bảo mật</button>
+        </form>
+        <div className="subscription-table-wrap"><table className="subscription-table"><thead><tr><th>Kỳ</th><th>Provider / model</th><th>Lượt gọi</th><th>Input tokens</th><th>Output tokens</th><th>Tổng tokens</th></tr></thead><tbody>
+          {modelUsage.length ? modelUsage.map((usage) => <tr key={usage.id}><td>{usage.period}</td><td><strong>{usage.provider}</strong><small>{usage.model}</small></td><td>{usage.calls.toLocaleString("vi-VN")}</td><td>{usage.input_tokens.toLocaleString("vi-VN")}</td><td>{usage.output_tokens.toLocaleString("vi-VN")}</td><td>{usage.total_tokens.toLocaleString("vi-VN")}</td></tr>) : <tr><td colSpan={6}>Chưa có usage từ model riêng.</td></tr>}
+        </tbody></table></div>
+      </section>}
     </>}
 
     {requestOpen && data && <div className="sites-modal-layer">

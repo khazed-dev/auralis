@@ -48,8 +48,8 @@ class RAGEngine:
     
     QA_MATCH_THRESHOLD = 0.85  # Confidence threshold for using Q&A pair directly
     
-    def __init__(self):
-        self.llm = get_llm_service()
+    def __init__(self, llm_service=None):
+        self.llm = llm_service or get_llm_service()
         self.vector_store = get_vector_store()
         self._qa_cache: Dict[str, List[Dict]] = {}  # Cache Q&A pairs by site_id
         self._qa_embeddings_cache: Dict[str, List[Tuple[str, List[float]]]] = {}  # Cache Q&A embeddings

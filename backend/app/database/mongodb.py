@@ -101,6 +101,11 @@ class MongoDB:
         await self.db.subscription_upgrade_requests.create_index(
             [("owner_id", 1), ("status", 1), ("created_at", -1)]
         )
+        await self.db.byok_configs.create_index("owner_id", unique=True)
+        await self.db.model_usage.create_index(
+            [("owner_id", 1), ("period", 1), ("provider", 1), ("model", 1)],
+            unique=True,
+        )
     
     # ==================== Conversations ====================
     
