@@ -3291,6 +3291,14 @@ pre,
   color: #b91c1c;
 }
 
+.crawl-history-error-row td {
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px 12px 14px;
+}
+
 .embed-code-header {
   align-items: center;
   background: var(--deep-navy);

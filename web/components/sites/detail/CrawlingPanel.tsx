@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { API_BASE, authFetch, DEV_AUTH_ENABLED } from "@/lib/auth";
 import { CrawlHistory } from "./types";
 
@@ -204,29 +204,42 @@ export function CrawlingPanel({ siteId }: { siteId: string }) {
             <tbody>
               {history.length ? (
                 history.map((item, index) => (
-                  <tr key={item.job_id || `${item.created_at}-${index}`}>
-                    <td>
-                      {item.started_at || item.created_at
-                        ? new Date(
-                            item.started_at || item.created_at || "",
-                          ).toLocaleString("vi-VN")
-                        : "—"}
-                    </td>
-                    <td>{item.trigger}</td>
-                    <td>
-                      {item.pages_crawled || 0} / {item.pages_indexed || 0}
-                    </td>
-                    <td>
-                      <span className={`crawl-history-status ${item.status}`}>
-                        {item.status}
-                      </span>
-                    </td>
-                    <td>
-                      {item.duration_seconds
-                        ? `${Math.round(item.duration_seconds)} giây`
-                        : "—"}
-                    </td>
-                  </tr>
+                  <Fragment
+                    key={item.job_id || `${item.created_at}-${index}`}
+                  >
+                    <tr
+                      title={item.errors?.join("\n") || undefined}
+                    >
+                      <td>
+                        {item.started_at || item.created_at
+                          ? new Date(
+                              item.started_at || item.created_at || "",
+                            ).toLocaleString("vi-VN")
+                          : "—"}
+                      </td>
+                      <td>{item.trigger}</td>
+                      <td>
+                        {item.pages_crawled || 0} / {item.pages_indexed || 0}
+                      </td>
+                      <td>
+                        <span className={`crawl-history-status ${item.status}`}>
+                          {item.status}
+                        </span>
+                      </td>
+                      <td>
+                        {item.duration_seconds
+                          ? `${Math.round(item.duration_seconds)} giây`
+                          : "—"}
+                      </td>
+                    </tr>
+                    {item.errors?.length ? (
+                      <tr className="crawl-history-error-row">
+                        <td colSpan={5}>
+                          {item.errors[item.errors.length - 1]}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 ))
               ) : (
                 <tr>
