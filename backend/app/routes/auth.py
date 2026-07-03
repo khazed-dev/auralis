@@ -94,7 +94,7 @@ async def require_auth(
     if int(user.get("token_version") or 0) != token_data.token_version:
         raise HTTPException(status_code=401, detail="Session has been revoked")
 
-    if user.get("role") == UserRole.ADMIN.value and user.get("must_change_password"):
+    if user.get("role") in {UserRole.ADMIN.value, UserRole.PLATFORM_ADMIN.value} and user.get("must_change_password"):
         path = request.url.path.rstrip("/") or "/"
         allowed = path == _ADMIN_PASSWORD_RESET_PATH and request.method in ("GET", "PATCH")
         if not allowed:
@@ -103,6 +103,25 @@ async def require_auth(
                 detail={
                     "code": "must_change_password",
                     "message": "You must set a new password before using the dashboard.",
+                },
+            )
+    if user.get("role") == UserRole.PLATFORM_ADMIN.value:
+        path = request.url.path.rstrip("/") or "/"
+        allowed = (
+            path == "/api/auth/me"
+            or path == "/api/auth/logout"
+            or path.startswith("/api/subscriptions")
+            or (
+                path.startswith("/api/auth/users")
+                and request.method in {"GET", "POST", "PATCH"}
+            )
+        )
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "platform_scope_restricted",
+                    "message": "Platform administrators cannot access customer website data.",
                 },
             )
     
@@ -118,9 +137,21 @@ async def require_admin(user: dict = Depends(require_auth)) -> dict:
     return user
 
 
+async def require_platform_admin(user: dict = Depends(require_auth)) -> dict:
+    if user.get("role") != UserRole.PLATFORM_ADMIN.value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Platform admin access required")
+    return user
+
+
+async def require_account_admin(user: dict = Depends(require_auth)) -> dict:
+    if user.get("role") not in {UserRole.ADMIN.value, UserRole.PLATFORM_ADMIN.value}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account admin access required")
+    return user
+
+
 async def require_admin_or_user(user: dict = Depends(require_auth)) -> dict:
     """Allow admin and site-owner users; block agents from management endpoints."""
-    if user.get("role") == UserRole.AGENT.value:
+    if user.get("role") not in {UserRole.ADMIN.value, UserRole.USER.value}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied"
@@ -251,7 +282,7 @@ async def update_me(data: ProfileUpdate, user: dict = Depends(require_auth)):
 
 
 @router.post("/users", response_model=UserResponse)
-async def create_user_account(data: AdminUserCreate, admin: dict = Depends(require_admin)):
+async def create_user_account(data: AdminUserCreate, admin: dict = Depends(require_account_admin)):
     """Admin creates a new site-owner (user) account."""
     mongodb = await get_mongodb()
     auth_service = AuthService(mongodb)
@@ -282,7 +313,7 @@ async def create_user_account(data: AdminUserCreate, admin: dict = Depends(requi
 
 
 @router.patch("/users/{user_id}", response_model=UserResponse)
-async def update_user_account(user_id: str, data: SiteOwnerUpdate, _admin: dict = Depends(require_admin)):
+async def update_user_account(user_id: str, data: SiteOwnerUpdate, _admin: dict = Depends(require_account_admin)):
     """Admin updates a site-owner (role=user): name and/or password."""
     mongodb = await get_mongodb()
     auth_service = AuthService(mongodb)
@@ -296,7 +327,7 @@ async def update_user_account(user_id: str, data: SiteOwnerUpdate, _admin: dict 
 
 
 @router.get("/users", response_model=list[UserResponse])
-async def list_users(user: dict = Depends(require_admin)):
+async def list_users(user: dict = Depends(require_account_admin)):
     mongodb = await get_mongodb()
     auth_service = AuthService(mongodb)
     users = await auth_service.get_all_users()
@@ -305,6 +336,8 @@ async def list_users(user: dict = Depends(require_admin)):
 
 @router.put("/users/{user_id}/role")
 async def update_user_role(user_id: str, role: UserRole, admin: dict = Depends(require_admin)):
+    if role == UserRole.PLATFORM_ADMIN:
+        raise HTTPException(status_code=403, detail="Platform admin accounts must be provisioned securely")
     mongodb = await get_mongodb()
     auth_service = AuthService(mongodb)
     

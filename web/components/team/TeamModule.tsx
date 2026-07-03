@@ -8,7 +8,7 @@ type Member = {
   id: string;
   email: string;
   name: string;
-  role: "admin" | "user" | "agent";
+  role: "platform_admin" | "admin" | "user" | "agent";
   created_at: string;
   assigned_site_ids: string[];
 };
@@ -38,7 +38,9 @@ async function apiError(response: Response, fallback: string) {
 export function TeamModule() {
   const currentUser = useMemo(() => getStoredUser(), []);
   const isAdmin = currentUser?.role === "admin";
-  const [tab, setTab] = useState<TeamTab>(isAdmin ? "owners" : "agents");
+  const isPlatformAdmin = currentUser?.role === "platform_admin";
+  const canManageOwners = isAdmin || isPlatformAdmin;
+  const [tab, setTab] = useState<TeamTab>(canManageOwners ? "owners" : "agents");
   const [owners, setOwners] = useState<Member[]>([]);
   const [agents, setAgents] = useState<Member[]>([]);
   const [sites, setSites] = useState<SiteOption[]>([]);
@@ -61,17 +63,21 @@ export function TeamModule() {
         ]);
         return;
       }
-      const requests: Promise<unknown>[] = [
-        authFetch(`${API_BASE}/auth/agents`),
-        authFetch(`${API_BASE}/sites`),
-      ];
+      const requests: Promise<unknown>[] = isPlatformAdmin
+        ? [authFetch(`${API_BASE}/auth/users`)]
+        : [authFetch(`${API_BASE}/auth/agents`), authFetch(`${API_BASE}/sites`)];
       if (isAdmin) requests.push(authFetch(`${API_BASE}/auth/users`));
       const responses = (await Promise.all(requests)) as Response[];
       for (const response of responses) {
         if (!response.ok) throw new Error(await apiError(response, "Không thể tải đội ngũ."));
       }
-      setAgents((await responses[0].json()) as Member[]);
-      setSites((await responses[1].json()) as SiteOption[]);
+      if (isPlatformAdmin) {
+        const allUsers = (await responses[0].json()) as Member[];
+        setOwners(allUsers.filter((member) => member.role === "user"));
+      } else {
+        setAgents((await responses[0].json()) as Member[]);
+        setSites((await responses[1].json()) as SiteOption[]);
+      }
       if (isAdmin) {
         const allUsers = (await responses[2].json()) as Member[];
         setOwners(allUsers.filter((member) => member.role !== "agent"));
@@ -81,7 +87,7 @@ export function TeamModule() {
     } finally {
       setLoading(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, isPlatformAdmin]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => void loadTeam());
@@ -243,7 +249,7 @@ export function TeamModule() {
                     <td>
                       <div className="team-row-actions">
                         {member.role !== "admin" && <button onClick={() => openEdit(member)}>Chỉnh sửa</button>}
-                        {member.id !== currentUser?.id && member.role !== "admin" && <button className="danger" onClick={() => void removeMember(member)}>Xóa</button>}
+                        {!isPlatformAdmin && member.id !== currentUser?.id && member.role !== "admin" && <button className="danger" onClick={() => void removeMember(member)}>Xóa</button>}
                       </div>
                     </td>
                   </tr>

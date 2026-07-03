@@ -12,6 +12,7 @@ from app.config import settings
 
 
 class UserRole(str, Enum):
+    PLATFORM_ADMIN = "platform_admin"
     ADMIN = "admin"
     USER = "user"
     AGENT = "agent"
@@ -516,9 +517,34 @@ class AuthService:
             # Security warning for default email
             if settings.ADMIN_EMAIL == "admin@example.com":
                 logger.warning("SECURITY: Using default admin email. Consider changing ADMIN_EMAIL")
-                
         except Exception as e:
             logger.error(f"Failed to create admin user: {e}")
+
+    async def ensure_platform_admin_exists(self):
+        """Create the isolated platform administrator when explicitly configured."""
+        if not settings.PLATFORM_ADMIN_EMAIL or not settings.PLATFORM_ADMIN_PASSWORD:
+            logger.info("Platform admin auto-creation disabled")
+            return
+        existing = await self._provider.get_user_by_email(settings.PLATFORM_ADMIN_EMAIL)
+        if existing:
+            if existing.get("role") != UserRole.PLATFORM_ADMIN.value:
+                logger.warning("PLATFORM_ADMIN_EMAIL belongs to a different role; leaving it unchanged")
+            return
+        from app.core.security import validate_password
+        valid, message = validate_password(settings.PLATFORM_ADMIN_PASSWORD)
+        if not valid:
+            logger.error(f"Platform admin was not created: {message}")
+            return
+        await self._provider.create_user({
+            "email": settings.PLATFORM_ADMIN_EMAIL,
+            "name": settings.PLATFORM_ADMIN_NAME,
+            "password_hash": get_password_hash(settings.PLATFORM_ADMIN_PASSWORD),
+            "role": UserRole.PLATFORM_ADMIN.value,
+            "must_change_password": True,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        })
+        logger.info(f"Platform admin created: {settings.PLATFORM_ADMIN_EMAIL}")
 
 
 def user_to_response(user: dict) -> UserResponse:

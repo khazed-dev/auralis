@@ -128,6 +128,7 @@ async def lifespan(app: FastAPI):
         # Ensure default admin exists (if configured)
         auth_service = AuthService(mongodb)
         await auth_service.ensure_admin_exists()
+        await auth_service.ensure_platform_admin_exists()
         
         # Initialize and start the scheduler
         from app.routes.schedule import enqueue_scheduled_crawl, handle_queued_crawl
