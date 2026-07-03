@@ -93,6 +93,13 @@ class MongoDBProvider(BaseDatabaseProvider):
             await self.db.users.create_index("refresh_token_hash", unique=True, sparse=True)
             await self.db.crawl_jobs.create_index([("status", 1), ("queued_at", 1)])
             await self.db.documents.create_index("site_id")
+            await self.db.subscriptions.create_index("owner_id", unique=True)
+            await self.db.subscription_usage.create_index(
+                [("owner_id", 1), ("period", 1)], unique=True
+            )
+            await self.db.subscription_audit_logs.create_index(
+                [("owner_id", 1), ("created_at", -1)]
+            )
             logger.info("MongoDB indexes created")
         except Exception as e:
             logger.warning(f"Index creation warning: {e}")

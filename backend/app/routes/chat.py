@@ -13,6 +13,7 @@ from app.database import get_mongodb
 from app.config import settings
 from app.core.security import get_client_ip
 from app.routes.dependencies import require_widget_site
+from app.services.subscriptions import enforce_quota, increment_usage
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 
@@ -67,7 +68,11 @@ async def chat(request: Request, body: ChatRequest):
     - **stream**: Whether to stream the response (use /stream endpoint instead)
     """
     try:
-        await _validate_widget_site(request, body.site_id)
+        site = await _validate_widget_site(request, body.site_id)
+        mongodb = await get_mongodb()
+        owner_id = str(site.get("user_id") or "")
+        if owner_id:
+            await enforce_quota(mongodb, owner_id, "messages")
         rag_engine = get_rag_engine()
 
         response = await rag_engine.chat(
@@ -85,6 +90,8 @@ async def chat(request: Request, body: ChatRequest):
         
         response.suggest_handoff = suggest_handoff
         response.handoff_reason = handoff_reason
+        if owner_id:
+            await increment_usage(mongodb, owner_id, "messages")
         
         return response
         
@@ -104,7 +111,11 @@ async def chat_stream(request: Request, body: ChatRequest):
     Returns Server-Sent Events (SSE) with the response chunks.
     """
     try:
-        await _validate_widget_site(request, body.site_id)
+        site = await _validate_widget_site(request, body.site_id)
+        mongodb = await get_mongodb()
+        owner_id = str(site.get("user_id") or "")
+        if owner_id:
+            await enforce_quota(mongodb, owner_id, "messages")
         rag_engine = get_rag_engine()
 
         async def event_generator():
@@ -116,6 +127,8 @@ async def chat_stream(request: Request, body: ChatRequest):
                     site_id=body.site_id,
                 ):
                     yield f"data: {chunk}\n\n"
+                if owner_id:
+                    await increment_usage(mongodb, owner_id, "messages")
                 yield "data: [DONE]\n\n"
             except Exception as e:
                 yield f"data: Error: {str(e)}\n\n"

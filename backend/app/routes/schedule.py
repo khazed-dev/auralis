@@ -20,6 +20,7 @@ from app.models.schemas import (
     CrawlHistoryResponse,
     CrawlHistoryItem
 )
+from app.services.subscriptions import enforce_quota, increment_usage
 
 router = APIRouter(tags=["Schedule"])
 
@@ -32,6 +33,12 @@ async def _raise_if_crawl_cancelled(db, job_id: str) -> None:
 
 async def handle_queued_crawl(job_id: str, payload: dict) -> None:
     """Dispatch a durable queue payload to the existing crawl executors."""
+    db = await get_mongodb()
+    site = await db.get_site(payload["site_id"])
+    owner_id = str((site or {}).get("user_id") or "")
+    requested_pages = int(payload.get("max_pages") or 50)
+    if owner_id:
+        await enforce_quota(db, owner_id, "crawl_pages", requested_pages)
     kwargs = {
         "job_id": job_id,
         "site_url": payload["site_url"],
@@ -44,6 +51,9 @@ async def handle_queued_crawl(job_id: str, payload: dict) -> None:
         await _run_incremental_crawl_background(**kwargs)
     else:
         await _run_crawl_background(**kwargs)
+    if owner_id:
+        job = await db.get_crawl_job(job_id)
+        await increment_usage(db, owner_id, "crawl_pages", int((job or {}).get("pages_crawled") or 0))
 
 
 async def enqueue_scheduled_crawl(
