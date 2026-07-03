@@ -1,7 +1,7 @@
 """Subscription plans, tenant usage accounting, and quota enforcement."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from fastapi import HTTPException
@@ -53,6 +53,31 @@ async def resolve_owner_id(db, user: dict) -> str:
 
 async def get_subscription(db, owner_id: str) -> dict:
     document = await db.db.subscriptions.find_one({"owner_id": owner_id})
+    # Repair checkout accounts created before ownership IDs were normalized:
+    # checkout stored provider user_id while authenticated tenants use Mongo _id.
+    if not document:
+        try:
+            from bson import ObjectId
+            user = await db.db.users.find_one({"_id": ObjectId(owner_id)}, {"user_id": 1})
+        except Exception:
+            user = None
+        provider_user_id = (user or {}).get("user_id")
+        if provider_user_id:
+            document = await db.db.subscriptions.find_one({"owner_id": provider_user_id})
+            if document:
+                updates: dict[str, Any] = {"owner_id": owner_id, "updated_at": datetime.now(timezone.utc)}
+                checkout = await db.db.checkout_orders.find_one({"owner_id": provider_user_id})
+                if checkout:
+                    started = checkout.get("created_at") or datetime.now(timezone.utc)
+                    if started.tzinfo is None:
+                        started = started.replace(tzinfo=timezone.utc)
+                    updates.update({
+                        "plan": "starter", "status": "trialing",
+                        "started_at": started, "trial_ends_at": started + timedelta(days=7),
+                        "expires_at": started + timedelta(days=7),
+                    })
+                await db.db.subscriptions.update_one({"_id": document["_id"]}, {"$set": updates})
+                document.update(updates)
     if not document:
         return {
             "owner_id": owner_id,

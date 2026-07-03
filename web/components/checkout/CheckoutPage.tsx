@@ -13,7 +13,7 @@ const plans = {
 } as const;
 type PlanKey = keyof typeof plans;
 type Quote = { subtotal: number; discount: number; vat: number; total: number };
-type Success = { order_id: string; plan: PlanKey; email: string; password: string; payment_method: string; total: number };
+type Success = { order_id: string; plan: PlanKey; requested_plan?: PlanKey; trial_ends_at?: string; email: string; password: string; payment_method: string; total: number };
 const money = (value: number) => `${value.toLocaleString("vi-VN")} VNĐ`;
 
 export function CheckoutPage() {
@@ -84,7 +84,7 @@ export function CheckoutPage() {
 
 function CheckoutSuccess({ result, planName }: { result: Success; planName: string }) {
   return <div className="checkout-success-page"><div className="success-glow one" /><div className="success-glow two" /><main className="success-card">
-    <div className="success-check">✓</div><h1>Thanh toán thành công!</h1><p>Chào mừng bạn đến với gói <strong>{planName}</strong> của Auralis. Tài khoản của bạn đã sẵn sàng để sử dụng.</p>
+    <div className="success-check">✓</div><h1>Đăng ký thành công!</h1><p>Chào mừng bạn đến với gói <strong>{planName}</strong> của Auralis. Tài khoản dùng thử đã sẵn sàng{result.trial_ends_at ? ` đến ${new Date(result.trial_ends_at).toLocaleDateString("vi-VN")}` : ""}.</p>
     <section><small>CHI TIẾT ĐƠN HÀNG</small><span>Mã đơn hàng <b>#{result.order_id}</b></span><span>Phương thức <b>{result.payment_method === "bank_transfer" ? "VietQR" : "Thẻ"}</b></span><span>Tài khoản <b>{result.email}</b></span><span>Mật khẩu <b>{result.password}</b></span><span className="success-total">Tổng thanh toán <b>{money(result.total)}</b></span></section>
     <div className="success-actions"><Link href="/login">Đi đến Dashboard　→</Link><button type="button" onClick={() => window.print()}>▧　Xem hóa đơn</button></div><small>◎　Giao dịch được bảo mật bởi Auralis AI Security</small>
   </main><p>Bạn có thắc mắc? <a href="mailto:support@auralis.ai">Liên hệ bộ phận hỗ trợ</a></p></div>;
