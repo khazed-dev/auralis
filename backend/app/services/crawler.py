@@ -178,7 +178,9 @@ class CrawlerService:
                 encoding = response.charset or "utf-8"
                 html = raw.decode(encoding, errors="replace")
                 
-                # Parse HTML
+                # Parse HTML. Keep the original string available because some
+                # WordPress themes wrap meaningful page content in semantic
+                # header/nav/aside containers.
                 soup = BeautifulSoup(html, "html.parser")
                 
                 # Remove unwanted elements
@@ -203,6 +205,25 @@ class CrawlerService:
                     text = re.sub(r' {2,}', ' ', text)
                 else:
                     text = soup.get_text(separator="\n", strip=True)
+
+                # If aggressive boilerplate removal stripped the actual page,
+                # retry conservatively. This keeps product/category content
+                # while still excluding executable and invisible elements.
+                if len(text) < 100:
+                    fallback_soup = BeautifulSoup(html, "html.parser")
+                    for element in fallback_soup.find_all(
+                        ["script", "style", "noscript", "template"]
+                    ):
+                        element.decompose()
+                    fallback_content = (
+                        fallback_soup.find("main")
+                        or fallback_soup.find("article")
+                        or fallback_soup.find("body")
+                        or fallback_soup
+                    )
+                    text = fallback_content.get_text(separator="\n", strip=True)
+                    text = re.sub(r'\n{3,}', '\n\n', text)
+                    text = re.sub(r' {2,}', ' ', text)
                 
                 # Skip pages with very little content
                 if len(text) < 100:
