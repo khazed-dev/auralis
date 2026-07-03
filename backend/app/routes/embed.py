@@ -22,6 +22,7 @@ from app.services.auth import UserRole
 from app.core.security import generate_sri_hash_for_file, validate_widget_domain, get_request_origin
 from app.services.crawl_queue import get_crawl_queue
 from app.routes.dependencies import require_site_manage, require_site_view
+from app.services.subscriptions import enforce_quota
 
 router = APIRouter(prefix="/api/embed", tags=["embed"])
 
@@ -178,11 +179,12 @@ async def setup_chatbot(
     user_id = str(user["_id"])
     
     mongodb = await get_mongodb()
-    
     # Use provider interface method
     existing = await mongodb.get_site(site_id)
     if existing and existing.get("user_id") != user_id:
         raise HTTPException(status_code=400, detail="This site is already registered by another user")
+    if user.get("role") != UserRole.ADMIN.value and not existing:
+        await enforce_quota(mongodb, user_id, "sites")
     
     # Extract domain from URL for auto-whitelisting
     from app.core.security import extract_domain_from_url

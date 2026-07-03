@@ -91,6 +91,13 @@ class MongoDB:
         await self.db.users.create_index("user_id", unique=True)
         await self.db.users.create_index("refresh_token_hash", unique=True, sparse=True)
         await self.db.crawl_jobs.create_index([("status", 1), ("queued_at", 1)])
+        await self.db.subscriptions.create_index("owner_id", unique=True)
+        await self.db.subscription_usage.create_index(
+            [("owner_id", 1), ("period", 1)], unique=True
+        )
+        await self.db.subscription_audit_logs.create_index(
+            [("owner_id", 1), ("created_at", -1)]
+        )
     
     # ==================== Conversations ====================
     

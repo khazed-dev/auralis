@@ -6087,3 +6087,28 @@ pre,
     padding: 32px 22px;
   }
 }
+/* Subscription and quota */
+.subscription-page { display: grid; gap: 24px; }
+.subscription-hero { display: flex; align-items: center; gap: 32px; padding: 28px; border: 1px solid var(--border); border-radius: 18px; background: linear-gradient(135deg, #091c66, #2f8bff); color: white; }
+.subscription-hero > div:first-child { flex: 1; }
+.subscription-hero span, .subscription-hero p { opacity: .8; }
+.subscription-hero h2 { margin: 6px 0; font-size: 32px; }
+.subscription-hero button { border: 0; border-radius: 10px; padding: 12px 18px; font-weight: 700; color: #091c66; background: white; }
+.quota-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.quota-card { padding: 22px; border: 1px solid var(--border); border-radius: 16px; background: white; }
+.quota-card header { display: flex; justify-content: space-between; gap: 16px; }
+.quota-card h3 { margin: 0; font-size: 18px; }
+.quota-card p { margin: 10px 0 0; color: #64748b; }
+.quota-track { height: 9px; margin-top: 20px; overflow: hidden; border-radius: 99px; background: #e2e8f0; }
+.quota-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(135deg, #12d6c7, #2f8bff 55%, #7a35ff); }
+.quota-track span.warning { background: #f59e0b; }
+.quota-track span.danger { background: #ef4444; }
+.subscription-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 16px; background: white; }
+.subscription-table { width: 100%; border-collapse: collapse; }
+.subscription-table th, .subscription-table td { padding: 16px 18px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+.subscription-table td small { display: block; margin-top: 4px; color: #64748b; }
+.subscription-table select { min-width: 130px; padding: 9px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; }
+.subscription-status { padding: 5px 9px; border-radius: 99px; background: #ecfdf5; color: #047857; font-weight: 700; font-size: 13px; }
+.subscription-error { color: #b91c1c; }
+.subscription-notice { padding: 12px 16px; border-radius: 10px; background: #ecfdf5; color: #047857; }
+@media (max-width: 760px) { .subscription-hero { align-items: flex-start; flex-direction: column; } .quota-grid { grid-template-columns: 1fr; } }

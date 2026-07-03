@@ -21,6 +21,7 @@ const primaryNav: Array<{
 ];
 
 const utilityNav = [
+  { label: "Gói dịch vụ", href: "/dashboard/subscription", icon: "bolt" as IconName },
   { label: "Cài đặt", href: "/dashboard/settings", icon: "settings" as IconName },
   { label: "Trợ giúp", href: "/dashboard/help", icon: "help" as IconName },
 ];
@@ -175,6 +176,16 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
         <div className="dashboard-sidebar-footer">
           <nav className="dashboard-nav dashboard-utility-nav">
+            {user?.role === "admin" && (
+              <Link
+                className={pathname === "/dashboard/admin/subscriptions" ? "active" : ""}
+                href="/dashboard/admin/subscriptions"
+                title={collapsed ? "Quản lý gói" : undefined}
+              >
+                <Icon name="users" />
+                <span>Quản lý gói</span>
+              </Link>
+            )}
             {utilityNav.map((item) => (
               <Link
                 className={pathname === item.href ? "active" : ""}

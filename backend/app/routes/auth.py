@@ -4,6 +4,7 @@ from typing import Optional
 from loguru import logger
 from slowapi import Limiter
 from pydantic import BaseModel, EmailStr, field_validator
+from datetime import datetime
 
 from app.database import get_mongodb
 from app.config import settings
@@ -261,6 +262,22 @@ async def create_user_account(data: AdminUserCreate, admin: dict = Depends(requi
         raise HTTPException(status_code=400, detail=str(e))
     if not user:
         raise HTTPException(status_code=400, detail="Email already registered")
+    if getattr(mongodb, "db", None) is not None:
+        await mongodb.db.subscriptions.update_one(
+            {"owner_id": str(user["_id"])},
+            {
+                "$setOnInsert": {
+                    "owner_id": str(user["_id"]),
+                    "plan": "starter",
+                    "status": "active",
+                    "custom_limits": {},
+                    "started_at": datetime.utcnow(),
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow(),
+                }
+            },
+            upsert=True,
+        )
     return user_to_response(user)
 
 
@@ -319,6 +336,9 @@ async def delete_user(user_id: str, admin: dict = Depends(require_admin)):
 @router.post("/agents", response_model=UserResponse)
 async def create_agent(data: AgentCreate, caller: dict = Depends(require_admin_or_user)):
     mongodb = await get_mongodb()
+    if caller.get("role") == UserRole.USER.value:
+        from app.services.subscriptions import enforce_quota
+        await enforce_quota(mongodb, str(caller["_id"]), "members")
     auth_service = AuthService(mongodb)
     try:
         user = await auth_service.create_support_agent(caller, data)
