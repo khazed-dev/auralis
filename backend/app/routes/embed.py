@@ -228,25 +228,9 @@ async def setup_chatbot(
     })
     
     api_url = get_embed_url(http_request)
-    sri_hash = get_widget_sri_hash()
-    
-    # Generate embed script with optional SRI
-    if sri_hash:
-        embed_script = f'''<!-- Auralis AI Widget (Secure) -->
-<script>
-(function() {{
-  var s = document.createElement('script');
-  s.src = '{api_url}/chatbot.js';
-  s.async = true;
-  s.integrity = '{sri_hash}';
-  s.crossOrigin = 'anonymous';
-  s.dataset.siteId = '{site_id}';
-  s.dataset.apiUrl = '{api_url}';
-  document.head.appendChild(s);
-}})();
-</script>'''
-    else:
-        embed_script = f'''<!-- Auralis AI Widget -->
+    # The widget URL is mutable, so SRI must not be included by default.
+    # SRI is only safe with immutable/versioned asset URLs.
+    embed_script = f'''<!-- Auralis AI Widget -->
 <script>
 (function() {{
   var s = document.createElement('script');
@@ -303,7 +287,7 @@ async def get_site_status(
 async def get_embed_script(
     site_id: str,
     request: Request,
-    include_sri: bool = True,
+    include_sri: bool = False,
     _user: dict = Depends(require_site_manage),
 ):
     """Get the embed script for a site (public endpoint)."""
