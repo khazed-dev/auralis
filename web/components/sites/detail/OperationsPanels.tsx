@@ -219,7 +219,7 @@ export function EmbedPanel({ siteId }: { siteId: string }) {
   const load = useCallback(async () => {
     if (DEV_AUTH_ENABLED) {
       const origin = window.location.origin;
-      setScript(`<!-- Auralis Widget (Secure) -->\n<script>\n(function() {\n  var s = document.createElement('script');\n  s.src = '${origin}/widget/chatbot.js';\n  s.async = true;\n  s.dataset.siteId = '${siteId}';\n  s.dataset.apiUrl = '${origin}';\n  document.head.appendChild(s);\n})();\n<\\/script>`);
+      setScript(`<!-- Auralis AI Widget -->\n<script>\n(function() {\n  var s = document.createElement('script');\n  s.src = '${origin}/chatbot.js';\n  s.async = true;\n  s.dataset.siteId = '${siteId}';\n  s.dataset.apiUrl = '${origin}';\n  document.head.appendChild(s);\n})();\n<\\/script>`);
       setSri("sha384-demo-local-development");
       return;
     }

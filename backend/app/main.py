@@ -12,7 +12,7 @@ Provider Architecture:
 - Cache: Memory (extensible to Redis)
 """
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -253,6 +253,15 @@ if os.path.exists(frontend_path):
         app.mount("/js", StaticFiles(directory=js_path), name="js")
     if os.path.exists(widget_path):
         app.mount("/widget", StaticFiles(directory=widget_path), name="widget")
+
+
+@app.get("/chatbot.js", include_in_schema=False)
+async def chatbot_script():
+    """Serve the widget at a stable, brand-neutral root URL."""
+    path = os.path.join(frontend_path, "widget", "chatbot.js")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="application/javascript")
+    raise HTTPException(status_code=404, detail="Widget script not found")
 
 
 @app.get("/")
