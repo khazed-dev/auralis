@@ -58,6 +58,14 @@ class MongoDBProvider(BaseDatabaseProvider):
             await self.db.conversations.create_index("updated_at")
             await self.db.conversations.create_index("created_at")
             await self.db.conversations.create_index([("messages.content", "text")])
+            # Promote the legacy metadata tenant key before indexing.
+            await self.db.pages.update_many(
+                {
+                    "site_id": {"$exists": False},
+                    "metadata.site_id": {"$type": "string"},
+                },
+                [{"$set": {"site_id": "$metadata.site_id"}}],
+            )
             page_indexes = await self.db.pages.index_information()
             if page_indexes.get("url_1", {}).get("unique"):
                 await self.db.pages.drop_index("url_1")
