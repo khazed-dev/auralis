@@ -111,6 +111,7 @@ async def require_auth(
             path == "/api/auth/me"
             or path == "/api/auth/logout"
             or path.startswith("/api/subscriptions")
+            or path.startswith("/api/checkout/promos")
             or (
                 path.startswith("/api/auth/users")
                 and request.method in {"GET", "POST", "PATCH"}

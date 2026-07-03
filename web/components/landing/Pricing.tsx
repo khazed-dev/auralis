@@ -2,6 +2,7 @@ import { Icon } from "@/components/ui/Icon";
 
 const plans = [
   {
+    key: "starter",
     name: "Khởi đầu",
     price: "Miễn phí",
     suffix: "",
@@ -14,6 +15,7 @@ const plans = [
     cta: "Bắt đầu dùng thử",
   },
   {
+    key: "growth",
     name: "Tăng trưởng",
     price: "2,4 triệu",
     suffix: "VNĐ/tháng",
@@ -27,6 +29,7 @@ const plans = [
     popular: true,
   },
   {
+    key: "business",
     name: "Doanh nghiệp",
     price: "9,8 triệu",
     suffix: "VNĐ/tháng",
@@ -39,6 +42,7 @@ const plans = [
     cta: "Liên hệ tư vấn",
   },
   {
+    key: "custom",
     name: "Tùy chỉnh",
     price: "Linh hoạt",
     suffix: "",
@@ -75,7 +79,7 @@ export function Pricing() {
                   </li>
                 ))}
               </ul>
-              <a className={plan.popular ? "button" : "plan-button"} href="/login">
+              <a className={plan.popular ? "button" : "plan-button"} href={plan.key === "custom" ? "/#contact" : `/checkout?plan=${plan.key}`}>
                 {plan.cta}
               </a>
             </article>
