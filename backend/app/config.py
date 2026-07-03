@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
     SITE_URL: str = "http://localhost:8000"
+    ENABLE_PUBLIC_DATA_EXPLORER: bool = False
+    ENABLE_LEGACY_CRAWL_API: bool = False
+    REQUIRE_WIDGET_DOMAIN_VALIDATION_IN_PRODUCTION: bool = True
     
     # ===========================================
     # Security Settings
@@ -162,7 +165,10 @@ class Settings(BaseSettings):
     # ===========================================
     JWT_SECRET: str = "CHANGE-THIS-SECRET-IN-PRODUCTION"
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_HOURS: int = 24
+    JWT_EXPIRE_HOURS: int = 1
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 14
+    AUTH_COOKIE_NAME: str = "sitechat_refresh"
+    AUTH_COOKIE_SECURE: bool = True
     
     # Admin credentials (created on first run if no admin exists)
     # Set ADMIN_PASSWORD to empty string to disable auto-creation
@@ -225,8 +231,10 @@ class Settings(BaseSettings):
     # ===========================================
     MAX_PAGES: int = 100
     CRAWL_DELAY: float = 1.0
+    CRAWL_MAX_RESPONSE_BYTES: int = 5 * 1024 * 1024
     INCREMENTAL_SCAN_MAX_PAGES: int = 500
     INCREMENTAL_MAX_NEW_PAGES: int = 50
+    FAIL_STARTUP_ON_INSECURE_CONFIG: bool = True
     
     # ===========================================
     # Rate limiting

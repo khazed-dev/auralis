@@ -171,7 +171,7 @@ class SiteSecurityConfig(BaseModel):
         description="List of allowed domains (empty = allow all). Supports wildcards like *.example.com"
     )
     enforce_domain_validation: bool = Field(
-        default=False,
+        default=True,
         description="Whether to enforce domain validation (reject requests from non-whitelisted domains)"
     )
     require_referrer: bool = Field(

@@ -25,6 +25,7 @@ from app.core.site_access import (
     can_view_site,
 )
 from app.services.auth import AuthService, UserRole
+from app.routes.dependencies import require_widget_site
 from app.models.schemas import (
     HandoffRequest, HandoffSession, HandoffMessage, HandoffMessageRequest,
     HandoffAbandonRequest,
@@ -77,6 +78,7 @@ async def create_handoff(request: Request, body: HandoffRequest):
         logger.warning(f"Honeypot triggered on handoff create from {get_client_ip(request)}")
         return {"handoff_id": "blocked", "status": "pending", "message": "Handoff request created. An agent will be with you shortly."}
 
+    await require_widget_site(request, body.site_id)
     mongodb = await get_mongodb()
 
     existing = await mongodb.get_handoff_by_session(body.session_id, active_only=True)
@@ -120,13 +122,14 @@ async def create_handoff(request: Request, body: HandoffRequest):
 
 
 @router.get("/api/handoff/{handoff_id}")
-async def get_handoff(handoff_id: str):
+async def get_handoff(handoff_id: str, request: Request):
     """Get handoff session details (public for widget polling)."""
     mongodb = await get_mongodb()
     
     handoff = await mongodb.get_handoff_session(handoff_id)
     if not handoff:
         raise HTTPException(status_code=404, detail="Handoff not found")
+    await require_widget_site(request, handoff["site_id"])
     
     return {
         "handoff_id": handoff["handoff_id"],
@@ -140,11 +143,16 @@ async def get_handoff(handoff_id: str):
 @router.get("/api/handoff/{handoff_id}/messages")
 async def get_handoff_messages(
     handoff_id: str,
+    request: Request,
     since: Optional[datetime] = None
 ):
     """Poll for new messages in a handoff session (public for widget)."""
     mongodb = await get_mongodb()
     
+    handoff = await mongodb.get_handoff_session(handoff_id)
+    if not handoff:
+        raise HTTPException(status_code=404, detail="Handoff not found")
+    await require_widget_site(request, handoff["site_id"])
     result = await mongodb.get_handoff_messages(handoff_id, since)
     if not result:
         raise HTTPException(status_code=404, detail="Handoff not found")
@@ -165,6 +173,7 @@ async def send_visitor_message(
     handoff = await mongodb.get_handoff_session(handoff_id)
     if not handoff:
         raise HTTPException(status_code=404, detail="Handoff not found")
+    await require_widget_site(request, handoff["site_id"])
     
     if handoff["status"] == "resolved":
         raise HTTPException(status_code=400, detail="This conversation has been resolved")
@@ -198,6 +207,7 @@ async def abandon_handoff_public(
     handoff = await mongodb.get_handoff_session(handoff_id)
     if not handoff:
         raise HTTPException(status_code=404, detail="Handoff not found")
+    await require_widget_site(request, handoff["site_id"])
 
     if handoff.get("session_id") != body.session_id:
         raise HTTPException(status_code=403, detail="Invalid session for this handoff")
@@ -218,8 +228,9 @@ async def abandon_handoff_public(
 
 
 @router.get("/api/sites/{site_id}/handoff/availability", response_model=HandoffAvailabilityResponse)
-async def check_availability(site_id: str):
+async def check_availability(site_id: str, request: Request):
     """Check if human agents are available (public for widget)."""
+    await require_widget_site(request, site_id)
     mongodb = await get_mongodb()
     
     result = await mongodb.check_business_hours(site_id)
@@ -546,8 +557,9 @@ async def update_handoff_config(
 
 
 @router.get("/api/sites/{site_id}/business-hours")
-async def get_business_hours(site_id: str):
+async def get_business_hours(site_id: str, request: Request):
     """Get business hours for a site (public for widget)."""
+    await require_widget_site(request, site_id)
     mongodb = await get_mongodb()
     
     config = await mongodb.get_site_handoff_config(site_id)
@@ -673,6 +685,7 @@ async def stream_handoff_messages(
         async def _not_found():
             yield f"event: error\ndata: {json.dumps({'error': 'Handoff not found'})}\n\n"
         return StreamingResponse(_not_found(), media_type="text/event-stream", status_code=404)
+    await require_widget_site(request, handoff["site_id"])
 
     async def generator():
         last_hash = None

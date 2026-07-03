@@ -21,6 +21,7 @@ from app.core.security import (
     match_domain_pattern,
     validate_widget_domain,
     check_security_configuration,
+    validate_public_http_url,
 )
 
 
@@ -238,20 +239,34 @@ class TestDomainValidation:
         
         is_valid, _ = validate_widget_domain(mock_request_example, allowed, enforce_validation=True)
         assert is_valid == True
-        
+
         is_valid, _ = validate_widget_domain(mock_request_trusted, allowed, enforce_validation=True)
         assert is_valid == True
-        
+
         is_valid, _ = validate_widget_domain(mock_request_malicious, allowed, enforce_validation=True)
         assert is_valid == False
-    
+
     def test_validate_widget_domain_empty_list(self):
         """Test that empty allowed list allows all."""
         mock_request = MagicMock()
         mock_request.headers = {"origin": "https://any.domain.com"}
-        
+
         is_valid, _ = validate_widget_domain(mock_request, [])
         assert is_valid == True
+
+
+class TestOutboundUrlSecurity:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("url", [
+        "http://127.0.0.1/admin",
+        "http://10.0.0.1/",
+        "http://169.254.169.254/latest/meta-data/",
+        "file:///etc/passwd",
+    ])
+    async def test_blocks_internal_and_non_http_urls(self, url):
+        valid, error = await validate_public_http_url(url)
+        assert valid is False
+        assert error
 
 
 class TestSecurityConfiguration:

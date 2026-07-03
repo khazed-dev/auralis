@@ -98,11 +98,14 @@ class MockDatabaseProvider(BaseDatabaseProvider):
     async def get_conversation_history(
         self,
         session_id: str,
-        limit: int = 10
+        limit: int = 10,
+        site_id: Optional[str] = None,
     ) -> List[Dict]:
         """Get recent messages from conversation."""
         conv = self._conversations.get(session_id)
         if not conv:
+            return []
+        if site_id and conv.get("site_id") != site_id:
             return []
         messages = conv.get("messages", [])
         return messages[-limit:] if limit else messages
@@ -299,6 +302,12 @@ class MockDatabaseProvider(BaseDatabaseProvider):
         user = self._users.get(user_id)
         if user:
             return {**user, "_id": user_id}
+        return None
+
+    async def get_user_by_refresh_hash(self, token_hash: str) -> Optional[Dict]:
+        for user_id, user in self._users.items():
+            if user.get("refresh_token_hash") == token_hash:
+                return {**user, "_id": user_id}
         return None
     
     async def update_user(self, user_id: str, updates: Dict) -> bool:

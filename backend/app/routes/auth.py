@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Request, status
+from fastapi import APIRouter, HTTPException, Depends, Request, Response, Cookie, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 from loguru import logger
@@ -6,6 +6,7 @@ from slowapi import Limiter
 from pydantic import BaseModel, EmailStr, field_validator
 
 from app.database import get_mongodb
+from app.config import settings
 from app.core.security import get_client_ip
 from app.services.auth import (
     AuthService, UserCreate, UserLogin, UserResponse, TokenResponse,
@@ -89,6 +90,8 @@ async def require_auth(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found"
         )
+    if int(user.get("token_version") or 0) != token_data.token_version:
+        raise HTTPException(status_code=401, detail="Session has been revoked")
 
     if user.get("role") == UserRole.ADMIN.value and user.get("must_change_password"):
         path = request.url.path.rstrip("/") or "/"
@@ -151,7 +154,7 @@ async def require_admin_or_user(user: dict = Depends(require_auth)) -> dict:
 
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("10/minute")
-async def login(request: Request, credentials: UserLogin):
+async def login(request: Request, response: Response, credentials: UserLogin):
     mongodb = await get_mongodb()
     auth_service = AuthService(mongodb)
     
@@ -165,13 +168,67 @@ async def login(request: Request, credentials: UserLogin):
     access_token = create_access_token(data={
         "sub": str(user["_id"]),
         "email": user["email"],
-        "role": user["role"]
+        "role": user["role"],
+        "ver": int(user.get("token_version") or 0),
     })
+    refresh_token = await auth_service.issue_refresh_token(str(user["_id"]))
+    response.set_cookie(
+        settings.AUTH_COOKIE_NAME,
+        refresh_token,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+        httponly=True,
+        secure=settings.AUTH_COOKIE_SECURE if settings.is_production else False,
+        samesite="strict",
+        path="/api/auth",
+    )
     
     return TokenResponse(
         access_token=access_token,
         user=user_to_response(user)
     )
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_session(
+    response: Response,
+    refresh_token: Optional[str] = Cookie(default=None, alias=settings.AUTH_COOKIE_NAME),
+):
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Refresh token missing")
+    # The opaque token is not self-describing; locate its owner by hash.
+    mongodb = await get_mongodb()
+    auth_service = AuthService(mongodb)
+    user = await auth_service.get_user_by_refresh_token(refresh_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    rotated = await auth_service.rotate_refresh_token(str(user["_id"]), refresh_token)
+    if not rotated:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+    user, new_refresh = rotated
+    response.set_cookie(
+        settings.AUTH_COOKIE_NAME,
+        new_refresh,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+        httponly=True,
+        secure=settings.AUTH_COOKIE_SECURE if settings.is_production else False,
+        samesite="strict",
+        path="/api/auth",
+    )
+    access_token = create_access_token({
+        "sub": str(user["_id"]),
+        "email": user["email"],
+        "role": user["role"],
+        "ver": int(user.get("token_version") or 0),
+    })
+    return TokenResponse(access_token=access_token, user=user_to_response(user))
+
+
+@router.post("/logout")
+async def logout(response: Response, user: dict = Depends(require_auth)):
+    mongodb = await get_mongodb()
+    await AuthService(mongodb).revoke_refresh_token(str(user["_id"]))
+    response.delete_cookie(settings.AUTH_COOKIE_NAME, path="/api/auth")
+    return {"message": "Logged out"}
 
 
 @router.get("/me", response_model=UserResponse)

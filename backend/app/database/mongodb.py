@@ -38,15 +38,23 @@ class MongoDB:
     
     async def _create_indexes(self):
         """Create necessary indexes."""
-        await self.db.conversations.create_index("session_id")
+        await self.db.conversations.create_index([("site_id", 1), ("session_id", 1)])
         await self.db.conversations.create_index("site_id")
         await self.db.conversations.create_index("updated_at")
         await self.db.conversations.create_index("created_at")
         await self.db.conversations.create_index([("messages.content", "text")])
-        await self.db.pages.create_index("url", unique=True)
+        page_indexes = await self.db.pages.index_information()
+        if page_indexes.get("url_1", {}).get("unique"):
+            await self.db.pages.drop_index("url_1")
+        await self.db.pages.create_index(
+            [("site_id", 1), ("url", 1)],
+            unique=True,
+            partialFilterExpression={"site_id": {"$type": "string"}},
+        )
         await self.db.crawl_jobs.create_index("created_at")
         await self.db.long_term_memory.create_index("user_id")
         await self.db.sites.create_index("site_id", unique=True)
+        await self.db.sites.create_index([("user_id", 1), ("created_at", -1)])
         await self.db.sites.create_index("status")
         await self.db.trigger_events.create_index("site_id")
         await self.db.trigger_events.create_index("trigger_id")
@@ -69,6 +77,10 @@ class MongoDB:
         await self.db.leads.create_index([("site_id", 1), ("captured_at", -1)])
         await self.db.users.create_index("owner_id")
         await self.db.users.create_index([("role", 1), ("owner_id", 1)])
+        await self.db.users.create_index("email", unique=True)
+        await self.db.users.create_index("user_id", unique=True)
+        await self.db.users.create_index("refresh_token_hash", unique=True, sparse=True)
+        await self.db.crawl_jobs.create_index([("status", 1), ("queued_at", 1)])
     
     # ==================== Conversations ====================
     
@@ -167,12 +179,16 @@ class MongoDB:
     async def get_conversation_history(
         self,
         session_id: str,
-        limit: int = None
+        limit: int = None,
+        site_id: Optional[str] = None,
     ) -> List[Dict]:
         """Get conversation history for a session."""
         limit = limit or settings.CONVERSATION_WINDOW_SIZE
         
-        doc = await self.db.conversations.find_one({"session_id": session_id})
+        query = {"session_id": session_id}
+        if site_id:
+            query["site_id"] = site_id
+        doc = await self.db.conversations.find_one(query)
         if not doc:
             return []
         
@@ -508,14 +524,20 @@ class MongoDB:
         metadata: Dict = None
     ) -> str:
         """Save a crawled page."""
+        metadata = metadata or {}
+        site_id = metadata.get("site_id")
+        query = {"url": url}
+        if site_id:
+            query["site_id"] = site_id
         result = await self.db.pages.update_one(
-            {"url": url},
+            query,
             {
                 "$set": {
+                    "site_id": site_id,
                     "title": title,
                     "content": content,
                     "chunk_count": chunk_count,
-                    "metadata": metadata or {},
+                    "metadata": metadata,
                     "last_crawled": datetime.utcnow(),
                     "status": "indexed"
                 },
@@ -672,6 +694,12 @@ class MongoDB:
             except Exception:
                 pass
         
+        if user:
+            user["_id"] = str(user["_id"])
+        return user
+
+    async def get_user_by_refresh_hash(self, token_hash: str) -> Optional[Dict]:
+        user = await self.db.users.find_one({"refresh_token_hash": token_hash})
         if user:
             user["_id"] = str(user["_id"])
         return user
@@ -1581,7 +1609,7 @@ class MongoDB:
         site_url = site.get("url")
         job = await self.db.crawl_jobs.find_one({
             "$or": [{"site_id": site_id}, {"target_url": site_url}],
-            "status": "running"
+            "status": {"$in": ["queued", "running"]}
         })
         
         if job:

@@ -54,7 +54,8 @@ class BaseDatabaseProvider(ABC):
     async def get_conversation_history(
         self,
         session_id: str,
-        limit: int = 10
+        limit: int = 10,
+        site_id: Optional[str] = None,
     ) -> List[Dict]:
         """Get recent messages from a conversation."""
         pass

@@ -2,7 +2,7 @@
 Crawl API routes.
 """
 import asyncio
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from loguru import logger
 
 from app.models.schemas import CrawlRequest, CrawlResponse, CrawlStatus, PageInfo
@@ -10,6 +10,7 @@ from app.services.crawler import CrawlerService
 from app.services.indexer import IndexerService
 from app.database import get_mongodb, get_vector_store
 from app.config import settings
+from app.routes.auth import require_admin
 
 router = APIRouter(prefix="/api/crawl", tags=["Crawl"])
 
@@ -59,7 +60,11 @@ async def _crawl_and_index(
 
 
 @router.post("", response_model=CrawlResponse)
-async def start_crawl(body: CrawlRequest, background_tasks: BackgroundTasks):
+async def start_crawl(
+    body: CrawlRequest,
+    background_tasks: BackgroundTasks,
+    _admin: dict = Depends(require_admin),
+):
     """
     Start a crawl job to index a website.
     
@@ -98,7 +103,7 @@ async def start_crawl(body: CrawlRequest, background_tasks: BackgroundTasks):
 
 
 @router.get("/status/{job_id}", response_model=CrawlStatus)
-async def get_crawl_status(job_id: str):
+async def get_crawl_status(job_id: str, _admin: dict = Depends(require_admin)):
     """
     Get the status of a crawl job.
     
@@ -129,7 +134,7 @@ async def get_crawl_status(job_id: str):
 
 
 @router.get("/latest", response_model=CrawlStatus)
-async def get_latest_crawl():
+async def get_latest_crawl(_admin: dict = Depends(require_admin)):
     """Get the latest crawl job status."""
     try:
         mongodb = await get_mongodb()
@@ -156,7 +161,10 @@ async def get_latest_crawl():
 
 
 @router.post("/reindex")
-async def reindex_all(background_tasks: BackgroundTasks):
+async def reindex_all(
+    background_tasks: BackgroundTasks,
+    _admin: dict = Depends(require_admin),
+):
     """
     Re-index all existing pages.
     
@@ -177,7 +185,7 @@ async def reindex_all(background_tasks: BackgroundTasks):
 
 
 @router.get("/pages", response_model=list)
-async def get_pages():
+async def get_pages(_admin: dict = Depends(require_admin)):
     """Get all indexed pages."""
     try:
         mongodb = await get_mongodb()
@@ -200,7 +208,7 @@ async def get_pages():
 
 
 @router.delete("/pages/{url:path}")
-async def delete_page(url: str):
+async def delete_page(url: str, _admin: dict = Depends(require_admin)):
     """
     Delete a page from the index.
     

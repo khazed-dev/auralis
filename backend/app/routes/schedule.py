@@ -3,12 +3,13 @@ API routes for scheduled crawling management.
 """
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
 from app.database import get_mongodb
 from app.config import settings
-from app.routes.auth import get_current_user
+from app.routes.dependencies import require_site_manage, require_site_view
+from app.services.crawl_queue import get_crawl_queue
 from app.services.crawler import CrawlerService
 from app.services.indexer import IndexerService
 from app.services.scheduler import get_scheduler
@@ -21,6 +22,43 @@ from app.models.schemas import (
 )
 
 router = APIRouter(tags=["Schedule"])
+
+
+async def handle_queued_crawl(job_id: str, payload: dict) -> None:
+    """Dispatch a durable queue payload to the existing crawl executors."""
+    kwargs = {
+        "job_id": job_id,
+        "site_url": payload["site_url"],
+        "site_id": payload["site_id"],
+        "max_pages": int(payload.get("max_pages") or 50),
+        "include_patterns": payload.get("include_patterns") or [],
+        "exclude_patterns": payload.get("exclude_patterns") or [],
+    }
+    if payload.get("action") == "incremental":
+        await _run_incremental_crawl_background(**kwargs)
+    else:
+        await _run_crawl_background(**kwargs)
+
+
+async def enqueue_scheduled_crawl(
+    site_url: str,
+    site_id: str,
+    max_pages: int,
+    include_patterns: list,
+    exclude_patterns: list,
+    trigger: str = "scheduled",
+) -> str:
+    db = await get_mongodb()
+    job_id = await db.create_scheduled_crawl_job(site_id, site_url, trigger)
+    await get_crawl_queue().enqueue(job_id, {
+        "action": "full",
+        "site_url": site_url,
+        "site_id": site_id,
+        "max_pages": max_pages,
+        "include_patterns": include_patterns,
+        "exclude_patterns": exclude_patterns,
+    })
+    return job_id
 
 
 async def _execute_crawl_job(
@@ -92,7 +130,7 @@ async def _execute_crawl_job(
 @router.get("/api/sites/{site_id}/crawl-schedule", response_model=CrawlScheduleResponse)
 async def get_crawl_schedule(
     site_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_site_view)
 ):
     """Get crawl schedule configuration for a site."""
     db = await get_mongodb()
@@ -125,7 +163,7 @@ async def get_crawl_schedule(
 async def update_crawl_schedule(
     site_id: str,
     update: CrawlScheduleUpdate,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_site_manage)
 ):
     """Update crawl schedule configuration for a site."""
     db = await get_mongodb()
@@ -176,8 +214,7 @@ async def update_crawl_schedule(
 @router.post("/api/sites/{site_id}/crawl-now")
 async def trigger_crawl_now(
     site_id: str,
-    background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_site_manage)
 ):
     """Trigger an immediate crawl for a site."""
     db = await get_mongodb()
@@ -206,15 +243,14 @@ async def trigger_crawl_now(
         trigger="manual"
     )
     
-    background_tasks.add_task(
-        _run_crawl_background,
-        job_id=job_id,
-        site_url=site_url,
-        site_id=site_id,
-        max_pages=max_pages,
-        include_patterns=include_patterns,
-        exclude_patterns=exclude_patterns
-    )
+    await get_crawl_queue().enqueue(job_id, {
+        "action": "full",
+        "site_url": site_url,
+        "site_id": site_id,
+        "max_pages": max_pages,
+        "include_patterns": include_patterns,
+        "exclude_patterns": exclude_patterns,
+    })
     
     return {
         "success": True,
@@ -226,8 +262,7 @@ async def trigger_crawl_now(
 @router.post("/api/sites/{site_id}/crawl-new")
 async def trigger_incremental_crawl(
     site_id: str,
-    background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_site_manage)
 ):
     """Crawl the site but index only URLs that are not already stored."""
     db = await get_mongodb()
@@ -248,18 +283,17 @@ async def trigger_incremental_crawl(
         target_url=site.get("url"),
         trigger="incremental"
     )
-    background_tasks.add_task(
-        _run_incremental_crawl_background,
-        job_id=job_id,
-        site_url=site.get("url"),
-        site_id=site_id,
-        max_pages=max(
+    await get_crawl_queue().enqueue(job_id, {
+        "action": "incremental",
+        "site_url": site.get("url"),
+        "site_id": site_id,
+        "max_pages": max(
             schedule_config.get("max_pages", 50),
             settings.INCREMENTAL_SCAN_MAX_PAGES
         ),
-        include_patterns=schedule_config.get("include_patterns", []),
-        exclude_patterns=schedule_config.get("exclude_patterns", [])
-    )
+        "include_patterns": schedule_config.get("include_patterns", []),
+        "exclude_patterns": schedule_config.get("exclude_patterns", []),
+    })
     return {
         "success": True,
         "job_id": job_id,
@@ -293,7 +327,10 @@ async def _run_incremental_crawl_background(
         # URL is the stable page identity in the current schema. Reading the
         # existing set does not mutate MongoDB or FAISS.
         existing_urls = set(
-            await db.db.pages.distinct("url", {"status": "indexed"})
+            await db.db.pages.distinct(
+                "url",
+                {"status": "indexed", "site_id": site_id},
+            )
         )
         discovered_new_pages = [
             page for page in (pages or [])
@@ -393,7 +430,7 @@ async def _run_crawl_background(
 async def get_crawl_history(
     site_id: str,
     limit: int = 10,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_site_view)
 ):
     """Get crawl history for a site."""
     db = await get_mongodb()
@@ -416,7 +453,7 @@ async def get_crawl_history(
 @router.get("/api/sites/{site_id}/crawl-status")
 async def get_crawl_status(
     site_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_site_view)
 ):
     """Get current crawl status for a site."""
     db = await get_mongodb()

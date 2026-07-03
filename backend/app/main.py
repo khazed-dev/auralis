@@ -18,6 +18,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
 from typing import Optional
+from datetime import datetime
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -46,6 +47,7 @@ from app.routes.messenger import router as messenger_router
 from app.routes.public_data import router as public_data_router
 from app.services.auth import AuthService
 from app.services.scheduler import get_scheduler
+from app.services.crawl_queue import get_crawl_queue
 
 
 # Configure logging
@@ -93,6 +95,33 @@ async def lifespan(app: FastAPI):
         # Initialize MongoDB
         mongodb = await get_mongodb()
         logger.info("MongoDB connected")
+        if (
+            settings.is_production
+            and settings.REQUIRE_WIDGET_DOMAIN_VALIDATION_IN_PRODUCTION
+        ):
+            from app.core.security import extract_domain_from_url
+            cursor = mongodb.db.sites.find(
+                {"$or": [
+                    {"config.security.allowed_domains": {"$exists": False}},
+                    {"config.security.allowed_domains": []},
+                ]},
+                {"site_id": 1, "url": 1},
+            )
+            migrated = 0
+            async for site in cursor:
+                domain = extract_domain_from_url(site.get("url", ""))
+                if not domain:
+                    continue
+                await mongodb.db.sites.update_one(
+                    {"_id": site["_id"]},
+                    {"$set": {
+                        "config.security.allowed_domains": [domain, f"*.{domain}"],
+                        "updated_at": datetime.utcnow(),
+                    }},
+                )
+                migrated += 1
+            if migrated:
+                logger.info(f"Backfilled widget domain allow-list for {migrated} sites")
         
         # Initialize Vector Store
         get_vector_store()
@@ -103,9 +132,13 @@ async def lifespan(app: FastAPI):
         await auth_service.ensure_admin_exists()
         
         # Initialize and start the scheduler
-        from app.routes.schedule import _execute_crawl_job
+        from app.routes.schedule import enqueue_scheduled_crawl, handle_queued_crawl
+        crawl_queue = get_crawl_queue()
+        crawl_queue.set_handler(handle_queued_crawl)
+        await crawl_queue.start()
+        logger.info("Durable crawl queue started")
         scheduler = get_scheduler()
-        scheduler.set_dependencies(mongodb, _execute_crawl_job)
+        scheduler.set_dependencies(mongodb, enqueue_scheduled_crawl)
         await scheduler.start()
         logger.info("Crawl scheduler started")
         
@@ -125,6 +158,8 @@ async def lifespan(app: FastAPI):
         scheduler = get_scheduler()
         scheduler.shutdown()
         logger.info("Crawl scheduler stopped")
+        await get_crawl_queue().stop()
+        logger.info("Durable crawl queue stopped")
         
         mongodb = await get_mongodb()
         await mongodb.disconnect()
@@ -174,7 +209,8 @@ app.add_middleware(
 # Include routers
 app.include_router(auth_router)
 app.include_router(chat_router)
-app.include_router(crawl_router)
+if settings.ENABLE_LEGACY_CRAWL_API:
+    app.include_router(crawl_router)
 app.include_router(admin_router)
 app.include_router(analytics_router)
 app.include_router(conversations_router)
@@ -188,7 +224,8 @@ app.include_router(schedule_router)
 app.include_router(qa_router)
 app.include_router(leads_router)
 app.include_router(messenger_router)
-app.include_router(public_data_router)
+if settings.ENABLE_PUBLIC_DATA_EXPLORER:
+    app.include_router(public_data_router)
 # Serve static files (frontend)
 # Get the absolute path to the frontend directory
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

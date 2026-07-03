@@ -2,7 +2,7 @@
 Embed API routes for generating embeddable chat widgets.
 """
 import os
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, HttpUrl
 from typing import Optional, List
@@ -19,6 +19,8 @@ from app.database.vector_store import get_vector_store
 from app.routes.auth import get_current_user, require_auth
 from app.services.auth import UserRole
 from app.core.security import generate_sri_hash_for_file, validate_widget_domain, get_request_origin
+from app.services.crawl_queue import get_crawl_queue
+from app.routes.dependencies import require_site_manage, require_site_view
 
 router = APIRouter(prefix="/api/embed", tags=["embed"])
 
@@ -143,7 +145,6 @@ async def crawl_and_index_site(url: str, site_id: str, max_pages: int = 50):
 async def setup_chatbot(
     request: SetupRequest,
     http_request: Request,
-    background_tasks: BackgroundTasks,
     user: dict = Depends(require_auth)
 ):
     """
@@ -190,14 +191,26 @@ async def setup_chatbot(
             "config": {
                 "security": {
                     "allowed_domains": [site_domain, f"*.{site_domain}"] if site_domain else [],
-                    "enforce_domain_validation": False,
+                    "enforce_domain_validation": True,
                     "require_referrer": False,
                     "rate_limit_per_session": 60
                 }
             }
         })
     
-    background_tasks.add_task(crawl_and_index_site, url, site_id, request.max_pages or 50)
+    job_id = await mongodb.create_scheduled_crawl_job(
+        site_id=site_id,
+        target_url=url,
+        trigger="setup",
+    )
+    await get_crawl_queue().enqueue(job_id, {
+        "action": "full",
+        "site_url": url,
+        "site_id": site_id,
+        "max_pages": request.max_pages or 50,
+        "include_patterns": [],
+        "exclude_patterns": [],
+    })
     
     api_url = get_embed_url(http_request)
     sri_hash = get_widget_sri_hash()
@@ -239,7 +252,10 @@ async def setup_chatbot(
 
 
 @router.get("/status/{site_id}")
-async def get_site_status(site_id: str):
+async def get_site_status(
+    site_id: str,
+    _user: dict = Depends(require_site_view),
+):
     """Get the status of a site's chatbot setup (public endpoint for widget)."""
     mongodb = await get_mongodb()
     
@@ -269,7 +285,12 @@ async def get_site_status(site_id: str):
 
 
 @router.get("/script/{site_id}")
-async def get_embed_script(site_id: str, request: Request, include_sri: bool = True):
+async def get_embed_script(
+    site_id: str,
+    request: Request,
+    include_sri: bool = True,
+    _user: dict = Depends(require_site_manage),
+):
     """Get the embed script for a site (public endpoint)."""
     mongodb = await get_mongodb()
     
@@ -318,7 +339,11 @@ async def get_embed_script(site_id: str, request: Request, include_sri: bool = T
 
 
 @router.get("/security/{site_id}")
-async def get_widget_security_info(site_id: str, request: Request):
+async def get_widget_security_info(
+    site_id: str,
+    request: Request,
+    _user: dict = Depends(require_site_manage),
+):
     """Get security information for the widget (SRI hash, allowed domains, etc.)."""
     mongodb = await get_mongodb()
     

@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 from loguru import logger
 
 from app.config import settings
+from app.core.security import validate_public_http_url
 from app.database import get_mongodb
 
 
@@ -51,8 +52,14 @@ class CrawlerService:
         max_pages = max_pages or settings.MAX_PAGES
         include_patterns = include_patterns or []
         exclude_patterns = exclude_patterns or []
+
+        is_valid, validation_error = await validate_public_http_url(start_url)
+        if not is_valid:
+            raise ValueError(f"Unsafe crawl URL: {validation_error}")
         
         # Compile regex patterns
+        if any(len(pattern) > 500 for pattern in [*include_patterns, *exclude_patterns]):
+            raise ValueError("Crawl URL patterns must be 500 characters or fewer")
         include_regex = [re.compile(p) for p in include_patterns] if include_patterns else None
         exclude_regex = [re.compile(p) for p in exclude_patterns] if exclude_patterns else None
         
@@ -121,7 +128,24 @@ class CrawlerService:
     ) -> Optional[Dict]:
         """Fetch a single page and extract content."""
         try:
-            async with session.get(url) as response:
+            current_url = url
+            response = None
+            for _ in range(6):
+                is_valid, validation_error = await validate_public_http_url(current_url)
+                if not is_valid:
+                    raise ValueError(f"Unsafe crawl URL: {validation_error}")
+                response = await session.get(current_url, allow_redirects=False)
+                if response.status not in {301, 302, 303, 307, 308}:
+                    break
+                location = response.headers.get("location")
+                response.release()
+                if not location:
+                    return None
+                current_url = urljoin(current_url, location)
+            else:
+                raise ValueError("Too many redirects")
+
+            async with response:
                 if response.status == 403:
                     logger.warning(f"Access forbidden (403) for {url} - site may be blocking crawlers")
                     self.errors.append(f"Access forbidden: {url}")
@@ -137,8 +161,17 @@ class CrawlerService:
                 content_type = response.headers.get("content-type", "")
                 if "text/html" not in content_type:
                     return None
-                
-                html = await response.text()
+                max_bytes = settings.CRAWL_MAX_RESPONSE_BYTES
+                content_length = response.headers.get("content-length")
+                if content_length and int(content_length) > max_bytes:
+                    self.errors.append(f"Page too large: {current_url}")
+                    return None
+                raw = await response.content.read(max_bytes + 1)
+                if len(raw) > max_bytes:
+                    self.errors.append(f"Page too large: {current_url}")
+                    return None
+                encoding = response.charset or "utf-8"
+                html = raw.decode(encoding, errors="replace")
                 
                 # Parse HTML
                 soup = BeautifulSoup(html, "html.parser")
@@ -171,7 +204,7 @@ class CrawlerService:
                     return None
                 
                 return {
-                    "url": url,
+                    "url": current_url,
                     "title": title.strip(),
                     "content": text,
                     "html": html,

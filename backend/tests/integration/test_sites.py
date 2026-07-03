@@ -102,7 +102,8 @@ class TestSiteConfigEndpoints:
         data = response.json()
         assert "appearance" in data
         assert "behavior" in data
-        assert "security" in data
+        assert "security" not in data
+        assert "system_prompt" not in data.get("behavior", {})
     
     @pytest.mark.asyncio
     async def test_get_site_config_not_found(self, client, mock_database):

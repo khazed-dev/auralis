@@ -1,13 +1,14 @@
 """
 Admin API routes.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from loguru import logger
 
 from app.models.schemas import HealthCheck, SystemStats
 from app.database import get_mongodb, get_vector_store
 from app.services.ollama import get_ollama_service
 from app.config import settings
+from app.routes.auth import require_admin
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
 
@@ -72,7 +73,7 @@ async def health_check():
 
 
 @router.get("/stats", response_model=SystemStats)
-async def get_stats():
+async def get_stats(_admin: dict = Depends(require_admin)):
     """
     Get system statistics.
     """
@@ -106,7 +107,7 @@ async def get_stats():
 
 
 @router.get("/config")
-async def get_config():
+async def get_config(_admin: dict = Depends(require_admin)):
     """
     Get current configuration (non-sensitive).
     """
@@ -122,7 +123,7 @@ async def get_config():
 
 
 @router.post("/clear-cache")
-async def clear_cache():
+async def clear_cache(_admin: dict = Depends(require_admin)):
     """
     Clear all caches.
     """
@@ -147,7 +148,7 @@ async def clear_cache():
 
 
 @router.delete("/clear-all")
-async def clear_all_data():
+async def clear_all_data(_admin: dict = Depends(require_admin)):
     """
     Clear all data (conversations, pages, vectors).
     

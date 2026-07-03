@@ -74,6 +74,8 @@ def mock_vector_store():
     mock_vs.add_documents = AsyncMock()
     mock_vs.delete_documents = AsyncMock()
     mock_vs.similarity_search = AsyncMock(return_value=[])
+    mock_vs.count_unique_metadata_values.return_value = 0
+    mock_vs.get_collection_stats.return_value = {"count": 0}
     return mock_vs
 
 
@@ -91,13 +93,15 @@ async def app(mock_database: MockDatabaseProvider, mock_vector_store) -> AsyncGe
          patch("app.routes.auth.get_mongodb", get_mock_db), \
          patch("app.routes.embed.get_mongodb", get_mock_db), \
          patch("app.routes.chat.get_mongodb", get_mock_db), \
+         patch("app.routes.dependencies.get_mongodb", get_mock_db), \
          patch("app.routes.conversations.get_mongodb", get_mock_db), \
          patch("app.routes.handoff.get_mongodb", get_mock_db), \
          patch("app.routes.triggers.get_mongodb", get_mock_db), \
          patch("app.routes.crawl.get_mongodb", get_mock_db), \
          patch("app.routes.analytics.get_mongodb", get_mock_db), \
          patch("app.routes.leads.get_mongodb", get_mock_db), \
-         patch("app.database.vector_store.get_vector_store", AsyncMock(return_value=mock_vector_store)):
+         patch("app.database.vector_store.get_vector_store", MagicMock(return_value=mock_vector_store)), \
+         patch("app.routes.sites.get_vector_store", MagicMock(return_value=mock_vector_store)):
         from app.main import app as fastapi_app
         yield fastapi_app
 

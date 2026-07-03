@@ -179,7 +179,7 @@ class RAGEngine:
             # Load history and trained Q&A concurrently, then make follow-up
             # questions standalone before retrieval.
             history, qa_match = await asyncio.gather(
-                mongodb.get_conversation_history(session_id),
+                mongodb.get_conversation_history(session_id, site_id=site_id),
                 self._check_qa_match(message, site_id),
             )
             retrieved_docs = None
@@ -300,7 +300,7 @@ class RAGEngine:
                 site_name = site.get("name") or site_url_filter.replace("https://", "").replace("http://", "")
 
         try:
-            history = await mongodb.get_conversation_history(session_id)
+            history = await mongodb.get_conversation_history(session_id, site_id=site_id)
             rewritten_query = await self._rewrite_query(message, history)
             retrieved_docs = await self._retrieve_documents(
                 rewritten_query,
@@ -403,7 +403,11 @@ Rewritten search query (just the query, no explanation):"""
                     url_prefix=sf,
                 )
             else:
-                results = vs.similarity_search_with_score(query, k=k_val * oversample)
+                results = vs.similarity_search_with_score(
+                    query,
+                    k=k_val * oversample,
+                    filter=metadata_filter,
+                )
             if sf:
                 filtered_results = []
                 for doc, score in results:

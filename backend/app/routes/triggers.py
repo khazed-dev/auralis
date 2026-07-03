@@ -3,7 +3,7 @@ API routes for proactive chat triggers management.
 """
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from loguru import logger
 
 from app.database import get_mongodb
@@ -18,6 +18,7 @@ from app.models.schemas import (
     TriggerAnalyticsResponse
 )
 from app.routes.auth import require_auth
+from app.routes.dependencies import require_site_manage, require_site_view, require_widget_site
 
 
 router = APIRouter(prefix="/api", tags=["triggers"])
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/api", tags=["triggers"])
 @router.get("/sites/{site_id}/triggers", response_model=SiteTriggers)
 async def get_site_triggers(
     site_id: str,
-    current_user: dict = Depends(require_auth)
+    _site: dict = Depends(require_site_view),
 ):
     """Get all triggers for a site."""
     mongodb = await get_mongodb()
@@ -38,7 +39,7 @@ async def get_site_triggers(
 async def create_trigger(
     site_id: str,
     trigger: ChatTriggerCreate,
-    current_user: dict = Depends(require_auth)
+    _site: dict = Depends(require_site_manage),
 ):
     """Create a new trigger for a site."""
     mongodb = await get_mongodb()
@@ -54,7 +55,7 @@ async def create_trigger(
 async def set_global_cooldown(
     site_id: str,
     cooldown_ms: int = Query(..., ge=0, le=300000),
-    current_user: dict = Depends(require_auth)
+    _site: dict = Depends(require_site_manage),
 ):
     """Set the global cooldown between triggers."""
     mongodb = await get_mongodb()
@@ -69,7 +70,7 @@ async def update_trigger(
     site_id: str,
     trigger_id: str,
     trigger_update: ChatTriggerUpdate,
-    current_user: dict = Depends(require_auth)
+    _site: dict = Depends(require_site_manage),
 ):
     """Update an existing trigger."""
     mongodb = await get_mongodb()
@@ -94,7 +95,7 @@ async def update_trigger(
 async def delete_trigger(
     site_id: str,
     trigger_id: str,
-    current_user: dict = Depends(require_auth)
+    _site: dict = Depends(require_site_manage),
 ):
     """Delete a trigger."""
     mongodb = await get_mongodb()
@@ -111,7 +112,7 @@ async def delete_trigger(
 async def reorder_triggers(
     site_id: str,
     request: TriggerReorderRequest,
-    current_user: dict = Depends(require_auth)
+    _site: dict = Depends(require_site_manage),
 ):
     """Reorder triggers by priority."""
     mongodb = await get_mongodb()
@@ -125,7 +126,11 @@ async def reorder_triggers(
 
 
 @router.get("/widget/{site_id}/triggers", response_model=SiteTriggers)
-async def get_widget_triggers(site_id: str):
+async def get_widget_triggers(
+    site_id: str,
+    request: Request,
+    _site: dict = Depends(require_widget_site),
+):
     """
     Public endpoint for widget to fetch active triggers.
     No authentication required.
@@ -145,9 +150,11 @@ async def get_widget_triggers(site_id: str):
 @router.post("/widget/{site_id}/triggers/event")
 async def log_trigger_event(
     site_id: str,
+    request: Request,
     trigger_id: str = Query(...),
     session_id: str = Query(...),
-    event_type: str = Query(..., pattern="^(shown|clicked|dismissed|converted)$")
+    event_type: str = Query(..., pattern="^(shown|clicked|dismissed|converted)$"),
+    _site: dict = Depends(require_widget_site),
 ):
     """
     Log a trigger event from the widget.
@@ -169,7 +176,7 @@ async def log_trigger_event(
 async def get_trigger_analytics(
     site_id: str,
     period_days: int = Query(default=7, ge=1, le=90),
-    current_user: dict = Depends(require_auth)
+    _site: dict = Depends(require_site_view),
 ):
     """Get trigger analytics for a site."""
     mongodb = await get_mongodb()
@@ -193,7 +200,7 @@ async def get_trigger_analytics(
 @router.post("/sites/{site_id}/triggers/defaults")
 async def create_default_triggers(
     site_id: str,
-    current_user: dict = Depends(require_auth)
+    _site: dict = Depends(require_site_manage),
 ):
     """Create default triggers for a site."""
     mongodb = await get_mongodb()

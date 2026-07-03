@@ -3,14 +3,37 @@ Analytics API routes for dashboard insights.
 """
 from datetime import datetime, timedelta
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
 from loguru import logger
 
 from app.database import get_mongodb
+from app.routes.auth import require_auth
+from app.core.site_access import is_admin, is_agent, assigned_site_ids
 
 
 router = APIRouter(prefix="/api/analytics", tags=["Analytics"])
+
+
+async def _analytics_site_ids(user: dict = Depends(require_auth)) -> Optional[List[str]]:
+    """None means platform admin; everyone else receives an explicit allow-list."""
+    if is_admin(user):
+        return None
+    if is_agent(user):
+        return assigned_site_ids(user)
+    db = await get_mongodb()
+    sites = await db.list_sites(user_id=str(user["_id"]))
+    return [site["site_id"] for site in sites]
+
+
+def _tenant_query(site_id: Optional[str], allowed: Optional[List[str]]) -> dict:
+    if allowed is None:
+        return {"site_id": site_id} if site_id else {}
+    if site_id:
+        if site_id not in allowed:
+            raise HTTPException(status_code=403, detail="Access denied")
+        return {"site_id": site_id}
+    return {"site_id": {"$in": allowed}}
 
 
 # ==================== Response Models ====================
@@ -84,7 +107,8 @@ class RecentConversation(BaseModel):
 
 @router.get("/overview", response_model=AnalyticsOverview)
 async def get_analytics_overview(
-    site_id: Optional[str] = Query(None, description="Filter by site ID")
+    site_id: Optional[str] = Query(None, description="Filter by site ID"),
+    allowed: Optional[List[str]] = Depends(_analytics_site_ids),
 ):
     """
     Get overview analytics for the dashboard.
@@ -93,9 +117,7 @@ async def get_analytics_overview(
         mongodb = await get_mongodb()
         
         # Build query filter
-        query = {}
-        if site_id:
-            query["site_id"] = site_id
+        query = _tenant_query(site_id, allowed)
         
         # Get all conversations
         conversations = await mongodb.db.conversations.find(query).to_list(length=10000)
@@ -137,12 +159,13 @@ async def get_analytics_overview(
         satisfaction_rate = (positive_feedback / total_feedback * 100) if total_feedback > 0 else 0
         
         # Get active sites count
-        sites_count = await mongodb.db.sites.count_documents({"status": "ready"})
+        sites_query = {"status": "ready"}
+        if allowed is not None:
+            sites_query["site_id"] = {"$in": allowed}
+        sites_count = await mongodb.db.sites.count_documents(sites_query)
 
         # Get handoff stats
-        handoff_query = {}
-        if site_id:
-            handoff_query["site_id"] = site_id
+        handoff_query = _tenant_query(site_id, allowed)
         total_handoffs = await mongodb.db.handoff_sessions.count_documents(handoff_query)
         resolved_handoffs = await mongodb.db.handoff_sessions.count_documents(
             {**handoff_query, "status": "resolved"}
@@ -164,6 +187,8 @@ async def get_analytics_overview(
             handoff_rate=handoff_rate,
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Analytics overview error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -172,7 +197,8 @@ async def get_analytics_overview(
 @router.get("/conversations", response_model=ConversationTrend)
 async def get_conversation_trend(
     site_id: Optional[str] = Query(None, description="Filter by site ID"),
-    period: str = Query("7d", description="Time period: 7d or 30d")
+    period: str = Query("7d", description="Time period: 7d or 30d"),
+    allowed: Optional[List[str]] = Depends(_analytics_site_ids),
 ):
     """
     Get conversation trend data for charts.
@@ -187,9 +213,7 @@ async def get_conversation_trend(
         prev_start_date = start_date - timedelta(days=days)
         
         # Build query filter
-        query = {}
-        if site_id:
-            query["site_id"] = site_id
+        query = _tenant_query(site_id, allowed)
         
         # Get all conversations
         conversations = await mongodb.db.conversations.find(query).to_list(length=10000)
@@ -256,6 +280,8 @@ async def get_conversation_trend(
             change_percentage=round(change_percentage, 1)
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Conversation trend error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -264,7 +290,8 @@ async def get_conversation_trend(
 @router.get("/popular-questions", response_model=List[PopularQuestion])
 async def get_popular_questions(
     site_id: Optional[str] = Query(None, description="Filter by site ID"),
-    limit: int = Query(10, description="Number of results", ge=1, le=50)
+    limit: int = Query(10, description="Number of results", ge=1, le=50),
+    allowed: Optional[List[str]] = Depends(_analytics_site_ids),
 ):
     """
     Get the most frequently asked questions.
@@ -273,9 +300,7 @@ async def get_popular_questions(
         mongodb = await get_mongodb()
         
         # Build query filter
-        query = {}
-        if site_id:
-            query["site_id"] = site_id
+        query = _tenant_query(site_id, allowed)
         
         # Get all conversations
         conversations = await mongodb.db.conversations.find(query).to_list(length=10000)
@@ -318,6 +343,8 @@ async def get_popular_questions(
         
         return result
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Popular questions error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -326,7 +353,8 @@ async def get_popular_questions(
 @router.get("/sources-used", response_model=List[SourceUsage])
 async def get_sources_used(
     site_id: Optional[str] = Query(None, description="Filter by site ID"),
-    limit: int = Query(10, description="Number of results", ge=1, le=50)
+    limit: int = Query(10, description="Number of results", ge=1, le=50),
+    allowed: Optional[List[str]] = Depends(_analytics_site_ids),
 ):
     """
     Get the most frequently cited sources.
@@ -335,9 +363,7 @@ async def get_sources_used(
         mongodb = await get_mongodb()
         
         # Build query filter
-        query = {}
-        if site_id:
-            query["site_id"] = site_id
+        query = _tenant_query(site_id, allowed)
         
         # Get all conversations
         conversations = await mongodb.db.conversations.find(query).to_list(length=10000)
@@ -382,6 +408,8 @@ async def get_sources_used(
         
         return result
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Sources used error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -390,7 +418,8 @@ async def get_sources_used(
 @router.get("/recent-conversations", response_model=List[RecentConversation])
 async def get_recent_conversations(
     site_id: Optional[str] = Query(None, description="Filter by site ID"),
-    limit: int = Query(20, description="Number of results", ge=1, le=100)
+    limit: int = Query(20, description="Number of results", ge=1, le=100),
+    allowed: Optional[List[str]] = Depends(_analytics_site_ids),
 ):
     """
     Get recent conversations with summaries.
@@ -399,9 +428,7 @@ async def get_recent_conversations(
         mongodb = await get_mongodb()
         
         # Build query filter
-        query = {}
-        if site_id:
-            query["site_id"] = site_id
+        query = _tenant_query(site_id, allowed)
         
         # Get conversations sorted by updated_at
         cursor = mongodb.db.conversations.find(query).sort("updated_at", -1).limit(limit)
@@ -435,13 +462,17 @@ async def get_recent_conversations(
         
         return result
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Recent conversations error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/conversations-by-site", response_model=List[SiteConversationStat])
-async def get_conversations_by_site():
+async def get_conversations_by_site(
+    allowed: Optional[List[str]] = Depends(_analytics_site_ids),
+):
     """
     Get conversation and message counts grouped by site.
     """
@@ -449,7 +480,10 @@ async def get_conversations_by_site():
         mongodb = await get_mongodb()
 
         # Aggregate conversations grouped by site_id
-        pipeline = [
+        pipeline = []
+        if allowed is not None:
+            pipeline.append({"$match": {"site_id": {"$in": allowed}}})
+        pipeline.extend([
             {"$group": {
                 "_id": "$site_id",
                 "conversation_count": {"$sum": 1},
@@ -457,7 +491,7 @@ async def get_conversations_by_site():
             }},
             {"$sort": {"conversation_count": -1}},
             {"$limit": 20}
-        ]
+        ])
         rows = await mongodb.db.conversations.aggregate(pipeline).to_list(length=20)
 
         # Fetch site names in bulk
@@ -482,6 +516,8 @@ async def get_conversations_by_site():
             ))
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Conversations by site error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

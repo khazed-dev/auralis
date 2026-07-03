@@ -18,6 +18,7 @@ from app.models.schemas import (
     LeadCreate, Lead, LeadListItem, LeadListResponse
 )
 from app.core.security import get_client_ip
+from app.routes.dependencies import require_widget_site
 
 limiter = Limiter(key_func=get_client_ip)
 
@@ -43,6 +44,7 @@ async def capture_lead(request: Request, body: LeadCreate):
         logger.warning(f"Honeypot triggered on lead capture from {get_client_ip(request)}")
         return {"success": True, "lead_id": "blocked", "message": "Lead captured successfully"}
 
+    await require_widget_site(request, body.site_id)
     mongodb = await get_mongodb()
 
     if not body.email and not body.name:
@@ -79,8 +81,13 @@ async def capture_lead(request: Request, body: LeadCreate):
 
 
 @router.get("/api/leads/check/{site_id}/{session_id}")
-async def check_lead_exists(site_id: str, session_id: str):
+async def check_lead_exists(
+    site_id: str,
+    session_id: str,
+    request: Request,
+):
     """Check if a lead exists for a session (for widget to avoid re-prompting)."""
+    await require_widget_site(request, site_id)
     mongodb = await get_mongodb()
     
     lead = await mongodb.get_lead_by_session(site_id, session_id)

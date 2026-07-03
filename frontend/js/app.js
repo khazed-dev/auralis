@@ -95,10 +95,14 @@ function syncSidebarActiveNav(viewId) {
 
 async function refreshCurrentUserFromServer() {
     try {
-        const res = await fetch(`${API_BASE}/auth/me`, { headers: getAuthHeaders() });
+        let res = await fetch(`${API_BASE}/auth/me`, { headers: getAuthHeaders() });
         if (res.status === 401) {
-            logout();
-            return false;
+            const refreshed = await refreshAccessToken();
+            if (!refreshed) {
+                await logout();
+                return false;
+            }
+            res = await fetch(`${API_BASE}/auth/me`, { headers: getAuthHeaders() });
         }
         if (!res.ok) return true;
         const data = await res.json();
@@ -117,6 +121,22 @@ async function refreshCurrentUserFromServer() {
         return true;
     } catch {
         return true;
+    }
+}
+
+async function refreshAccessToken() {
+    try {
+        const response = await fetch(`${API_BASE}/auth/refresh`, {
+            method: 'POST',
+            credentials: 'same-origin',
+        });
+        if (!response.ok) return false;
+        const data = await response.json();
+        localStorage.setItem('token', data.access_token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        return true;
+    } catch {
+        return false;
     }
 }
 
@@ -271,7 +291,16 @@ function updateUserUI() {
     if (mobileAvatar) mobileAvatar.textContent = initial;
 }
 
-function logout() {
+async function logout() {
+    try {
+        await fetch(`${API_BASE}/auth/logout`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            credentials: 'same-origin',
+        });
+    } catch {
+        // Local cleanup still happens if the API is unavailable.
+    }
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     window.location.href = '/login';

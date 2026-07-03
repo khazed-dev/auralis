@@ -2,6 +2,8 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 from jose import JWTError, jwt
 import bcrypt
+import hashlib
+import secrets
 from pydantic import BaseModel, EmailStr, field_validator
 from enum import Enum
 from loguru import logger
@@ -19,6 +21,11 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     name: str
+
+    @field_validator('email')
+    @classmethod
+    def normalize_email(cls, v: EmailStr) -> str:
+        return str(v).strip().lower()
     
     @field_validator('password')
     @classmethod
@@ -42,6 +49,11 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
+    @field_validator('email')
+    @classmethod
+    def normalize_email(cls, v: EmailStr) -> str:
+        return str(v).strip().lower()
 
 
 class ProfileUpdate(BaseModel):
@@ -154,13 +166,11 @@ class TokenData(BaseModel):
     user_id: Optional[str] = None
     email: Optional[str] = None
     role: Optional[UserRole] = None
+    token_version: int = 0
 
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
-
-
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
 
@@ -171,7 +181,9 @@ def get_password_hash(password: str) -> str:
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.utcnow() + (
+        expires_delta or timedelta(hours=settings.JWT_EXPIRE_HOURS)
+    )
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
@@ -185,7 +197,12 @@ def decode_token(token: str) -> Optional[TokenData]:
         role: str = payload.get("role")
         if user_id is None:
             return None
-        return TokenData(user_id=user_id, email=email, role=UserRole(role) if role else None)
+        return TokenData(
+            user_id=user_id,
+            email=email,
+            role=UserRole(role) if role else None,
+            token_version=int(payload.get("ver") or 0),
+        )
     except JWTError as e:
         logger.error(f"JWT decode error: {e}")
         return None
@@ -225,6 +242,55 @@ class AuthService:
         if not verify_password(password, user.get("password_hash", "")):
             return None
         return user
+
+    @staticmethod
+    def hash_refresh_token(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    async def issue_refresh_token(self, user_id: str) -> str:
+        """Issue and persist a single-use refresh token (rotation on every use)."""
+        token = secrets.token_urlsafe(48)
+        updates = {
+            "refresh_token_hash": self.hash_refresh_token(token),
+            "refresh_expires_at": datetime.utcnow() + timedelta(
+                days=settings.REFRESH_TOKEN_EXPIRE_DAYS
+            ),
+            "updated_at": datetime.utcnow(),
+        }
+        await self._provider.update_user(user_id, updates)
+        return token
+
+    async def rotate_refresh_token(self, user_id: str, token: str) -> Optional[tuple[dict, str]]:
+        user = await self._provider.get_user_by_id(user_id)
+        if not user:
+            return None
+        expected = user.get("refresh_token_hash") or ""
+        expires = user.get("refresh_expires_at")
+        if not expected or not secrets.compare_digest(expected, self.hash_refresh_token(token)):
+            return None
+        if not expires or expires <= datetime.utcnow():
+            return None
+        new_token = await self.issue_refresh_token(user_id)
+        return await self._provider.get_user_by_id(user_id), new_token
+
+    async def get_user_by_refresh_token(self, token: str) -> Optional[dict]:
+        token_hash = self.hash_refresh_token(token)
+        if hasattr(self._provider, "get_user_by_refresh_hash"):
+            return await self._provider.get_user_by_refresh_hash(token_hash)
+        return None
+
+    async def revoke_refresh_token(self, user_id: str) -> None:
+        await self._provider.update_user(
+            user_id,
+            {
+                "refresh_token_hash": None,
+                "refresh_expires_at": None,
+                "token_version": int(
+                    (await self._provider.get_user_by_id(user_id) or {}).get("token_version") or 0
+                ) + 1,
+                "updated_at": datetime.utcnow(),
+            },
+        )
     
     async def get_user_by_id(self, user_id: str) -> Optional[dict]:
         # Use provider interface

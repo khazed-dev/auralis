@@ -55,7 +55,10 @@ class IndexerService:
                 
                 # Crawling the same URL again must replace its old chunks rather
                 # than silently duplicating them in FAISS.
-                vector_store.delete_by_metadata({"url": page["url"]})
+                delete_filter = {"url": page["url"]}
+                if site_id:
+                    delete_filter["site_id"] = site_id
+                vector_store.delete_by_metadata(delete_filter)
 
                 # Add to vector store
                 vector_store.add_documents(chunks)
@@ -66,7 +69,10 @@ class IndexerService:
                     title=page["title"],
                     content=page["content"][:1000],  # Store preview
                     chunk_count=len(chunks),
-                    metadata=page.get("metadata", {})
+                    metadata={
+                        **(page.get("metadata", {}) or {}),
+                        **({"site_id": site_id} if site_id else {}),
+                    }
                 )
                 
                 total_chunks += len(chunks)

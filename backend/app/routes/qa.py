@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Query, HTTPException, Depends
 
 from app.database.mongodb import get_mongodb
-from app.routes.auth import get_current_user
+from app.routes.dependencies import require_site_manage
 from app.services.rag_engine import get_rag_engine
 from app.models.schemas import (
     QAPair,
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api/sites/{site_id}/qa", tags=["Q&A Training"])
 async def create_qa_pair(
     site_id: str,
     qa_create: QAPairCreate,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_site_manage)
 ):
     """Create a new Q&A pair for a site."""
     mongodb = await get_mongodb()
@@ -60,7 +60,7 @@ async def list_qa_pairs(
     limit: int = Query(20, ge=1, le=100, description="Items per page"),
     search: Optional[str] = Query(None, description="Search in question/answer"),
     enabled_only: bool = Query(False, description="Only return enabled Q&A pairs"),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_site_manage)
 ):
     """Get paginated list of Q&A pairs for a site."""
     mongodb = await get_mongodb()
@@ -92,7 +92,7 @@ async def list_qa_pairs(
 @router.get("/stats", response_model=QAStats)
 async def get_qa_stats(
     site_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_site_manage)
 ):
     """Get Q&A statistics for a site."""
     mongodb = await get_mongodb()
@@ -109,7 +109,7 @@ async def get_qa_stats(
 async def get_qa_pair(
     site_id: str,
     qa_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_site_manage)
 ):
     """Get a single Q&A pair."""
     mongodb = await get_mongodb()
@@ -129,7 +129,7 @@ async def update_qa_pair(
     site_id: str,
     qa_id: str,
     qa_update: QAPairUpdate,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_site_manage)
 ):
     """Update a Q&A pair."""
     mongodb = await get_mongodb()
@@ -160,7 +160,7 @@ async def update_qa_pair(
 async def delete_qa_pair(
     site_id: str,
     qa_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_site_manage)
 ):
     """Delete a Q&A pair."""
     mongodb = await get_mongodb()
@@ -187,7 +187,7 @@ async def delete_qa_pair(
 async def create_qa_from_conversation(
     site_id: str,
     request: QAPairFromConversation,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_site_manage)
 ):
     """Create a Q&A pair from an existing conversation message."""
     mongodb = await get_mongodb()
@@ -249,7 +249,7 @@ async def create_qa_from_conversation(
 async def toggle_qa_pair(
     site_id: str,
     qa_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_site_manage)
 ):
     """Toggle a Q&A pair's enabled status."""
     mongodb = await get_mongodb()

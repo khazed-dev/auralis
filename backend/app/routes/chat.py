@@ -12,11 +12,19 @@ from app.services.rag_engine import get_rag_engine
 from app.database import get_mongodb
 from app.config import settings
 from app.core.security import get_client_ip
+from app.routes.dependencies import require_widget_site
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 
 # Rate limiter
 limiter = Limiter(key_func=get_client_ip)
+
+
+async def _validate_widget_site(request: Request, site_id: str) -> dict:
+    """Backward-compatible wrapper around the shared widget guard."""
+    if not site_id:
+        raise HTTPException(status_code=422, detail="site_id is required")
+    return await require_widget_site(request, site_id)
 
 
 async def check_handoff_suggestion(site_id: str, answer: str, confidence: float) -> tuple[bool, str]:
@@ -59,6 +67,7 @@ async def chat(request: Request, body: ChatRequest):
     - **stream**: Whether to stream the response (use /stream endpoint instead)
     """
     try:
+        await _validate_widget_site(request, body.site_id)
         rag_engine = get_rag_engine()
 
         response = await rag_engine.chat(
@@ -79,6 +88,8 @@ async def chat(request: Request, body: ChatRequest):
         
         return response
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -93,6 +104,7 @@ async def chat_stream(request: Request, body: ChatRequest):
     Returns Server-Sent Events (SSE) with the response chunks.
     """
     try:
+        await _validate_widget_site(request, body.site_id)
         rag_engine = get_rag_engine()
 
         async def event_generator():
@@ -117,6 +129,8 @@ async def chat_stream(request: Request, body: ChatRequest):
             }
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Stream error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

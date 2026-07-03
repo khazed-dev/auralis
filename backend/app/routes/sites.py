@@ -1,15 +1,16 @@
 """
 Sites API routes for managing chatbot sites.
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import List, Optional
 from loguru import logger
 
 from app.database import get_mongodb
 from app.database.vector_store import get_vector_store
-from app.routes.auth import require_auth
+from app.routes.auth import require_auth, get_current_user
 from app.core.site_access import can_manage_site, can_view_site, is_admin, is_agent
 from app.models.schemas import SiteConfig, SiteConfigUpdate, SiteQuickPromptsConfig
+from app.routes.dependencies import require_widget_site
 
 router = APIRouter(prefix="/api/sites", tags=["sites"])
 
@@ -29,15 +30,19 @@ async def list_sites(user: dict = Depends(require_auth)):
         sites = await db.list_sites(user_id=user_id)
     
     result = []
-    vector_store = get_vector_store()
+    try:
+        vector_store = get_vector_store()
+    except Exception as exc:
+        logger.warning(f"Vector store unavailable while listing sites: {exc}")
+        vector_store = None
     for site in sites:
         site_url = site.get("url", "")
         site_id = site.get("site_id")
         
         job = await db.get_crawl_job_by_url(site_url) if hasattr(db, 'get_crawl_job_by_url') else None
-        total_pages = vector_store.count_unique_metadata_values(
-            "url",
-            {"site_id": site_id}
+        total_pages = (
+            vector_store.count_unique_metadata_values("url", {"site_id": site_id})
+            if vector_store else 0
         )
         
         job_status = job.get("status") if job else site.get("status", "pending")
@@ -70,10 +75,13 @@ async def get_site(site_id: str, user: dict = Depends(require_auth)):
         raise HTTPException(status_code=403, detail="Access denied")
     
     job = await db.get_crawl_job_by_url(site.get("url", "")) if hasattr(db, 'get_crawl_job_by_url') else None
-    total_pages = get_vector_store().count_unique_metadata_values(
-        "url",
-        {"site_id": site_id}
-    )
+    try:
+        total_pages = get_vector_store().count_unique_metadata_values(
+            "url", {"site_id": site_id}
+        )
+    except Exception as exc:
+        logger.warning(f"Vector store unavailable for site {site_id}: {exc}")
+        total_pages = 0
     
     return {
         "site_id": site.get("site_id"),
@@ -120,8 +128,12 @@ async def delete_site(site_id: str, user: dict = Depends(require_auth)):
 
 # ==================== Site Configuration Endpoints ====================
 
-@router.get("/{site_id}/config", response_model=SiteConfig)
-async def get_site_config(site_id: str):
+@router.get("/{site_id}/config")
+async def get_site_config(
+    site_id: str,
+    request: Request,
+    user: Optional[dict] = Depends(get_current_user),
+):
     """
     Get the configuration for a site.
     This endpoint is public as the widget needs to fetch config.
@@ -131,9 +143,23 @@ async def get_site_config(site_id: str):
     site = await db.get_site(site_id)
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
+    if user and can_manage_site(user, site):
+        config_data = site.get("config", {})
+        return SiteConfig(**config_data) if config_data else SiteConfig()
+    await require_widget_site(request, site_id)
     
-    config_data = site.get("config", {})
-    return SiteConfig(**config_data) if config_data else SiteConfig()
+    config = SiteConfig(**(site.get("config") or {}))
+    # Public widget bootstrap: explicitly allow-list client-visible fields.
+    return {
+        "appearance": config.appearance.model_dump(),
+        "behavior": {
+            "temperature": config.behavior.temperature,
+            "max_tokens": config.behavior.max_tokens,
+            "show_sources": config.behavior.show_sources,
+        },
+        "lead_capture": config.lead_capture.model_dump(),
+        "quick_prompts": config.quick_prompts.model_dump(),
+    }
 
 
 @router.put("/{site_id}/config", response_model=SiteConfig)

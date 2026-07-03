@@ -133,7 +133,37 @@ class TestAuthEndpoints:
         data = response.json()
         assert "access_token" in data
         assert data["token_type"] == "bearer"
+        assert "sitechat_refresh" in response.cookies
         assert data.get("user", {}).get("must_change_password") is False
+
+    @pytest.mark.asyncio
+    async def test_refresh_rotates_token_and_logout_revokes_session(self, client, mock_database):
+        mock_database.seed_user({
+            "user_id": "refresh-user",
+            "email": "refresh@example.com",
+            "name": "Refresh User",
+            "password_hash": get_password_hash("StrongPass123!"),
+            "role": "user",
+            "created_at": datetime.utcnow(),
+        })
+        login = await client.post(
+            "/api/auth/login",
+            json={"email": "refresh@example.com", "password": "StrongPass123!"},
+        )
+        assert login.status_code == 200
+        first_cookie = login.cookies.get("sitechat_refresh")
+
+        refreshed = await client.post("/api/auth/refresh")
+        assert refreshed.status_code == 200
+        assert refreshed.cookies.get("sitechat_refresh") != first_cookie
+
+        token = refreshed.json()["access_token"]
+        logout = await client.post(
+            "/api/auth/logout",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert logout.status_code == 200
+        assert (await client.post("/api/auth/refresh")).status_code == 401
     
     @pytest.mark.asyncio
     async def test_login_invalid_email(self, client, mock_database):

@@ -4,7 +4,11 @@ Security utilities and middleware for the SiteChat application.
 import re
 import secrets
 import html
+import asyncio
+import ipaddress
+import socket
 from typing import Optional
+from urllib.parse import urlparse
 from fastapi import Request, HTTPException, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -125,6 +129,20 @@ def validate_password(password: str) -> tuple[bool, str]:
     if len(password) < settings.MIN_PASSWORD_LENGTH:
         return False, f"Password must be at least {settings.MIN_PASSWORD_LENGTH} characters"
 
+    if settings.REQUIRE_PASSWORD_COMPLEXITY:
+        if not re.search(r"[A-Z]", password):
+            return False, "Password must contain an uppercase letter"
+        if not re.search(r"[a-z]", password):
+            return False, "Password must contain a lowercase letter"
+        if not re.search(r"\d", password):
+            return False, "Password must contain a digit"
+        weak_passwords = {
+            "password", "password1", "password123", "admin123",
+            "qwerty123", "letmein", "welcome123",
+        }
+        if password.lower() in weak_passwords:
+            return False, "Password is too common or weak"
+
     return True, ""
 
 
@@ -193,6 +211,10 @@ def log_security_warnings():
         logger.warning("=" * 60)
     else:
         logger.info("Security configuration check passed")
+    if warnings and settings.is_production and settings.FAIL_STARTUP_ON_INSECURE_CONFIG:
+        raise RuntimeError(
+            "Refusing to start production with insecure security configuration"
+        )
 
 
 # ===========================================
@@ -298,8 +320,10 @@ def validate_widget_domain(
             return True, None
         return False, "Could not determine request origin"
     
-    # If no domains configured, allow all
+    # Enforced validation without an allow-list must fail closed.
     if not allowed_domains:
+        if enforce_validation:
+            return False, "No authorized domains configured for this site"
         return True, None
     
     # Check against allowed domains
@@ -322,6 +346,61 @@ def get_request_origin(request: Request) -> Optional[str]:
     origin = request.headers.get("origin")
     referer = request.headers.get("referer")
     return extract_domain_from_url(origin) or extract_domain_from_url(referer)
+
+
+# ===========================================
+# Outbound URL / SSRF protection
+# ===========================================
+
+def _is_public_ip(value: str) -> bool:
+    """Return True only for globally routable IP addresses."""
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return address.is_global
+
+
+async def validate_public_http_url(url: str) -> tuple[bool, Optional[str]]:
+    """
+    Resolve and validate an outbound HTTP(S) URL.
+
+    Every resolved address must be globally routable. This blocks loopback,
+    private/link-local networks, cloud metadata IPs, and DNS answers that mix
+    public and private addresses.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False, "Invalid URL"
+
+    if parsed.scheme not in {"http", "https"}:
+        return False, "Only HTTP and HTTPS URLs are allowed"
+    if not parsed.hostname or parsed.username or parsed.password:
+        return False, "URL must contain a valid public hostname without credentials"
+
+    hostname = parsed.hostname.rstrip(".").lower()
+    if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
+        return False, "Local network addresses are not allowed"
+
+    try:
+        ipaddress.ip_address(hostname)
+        addresses = {hostname}
+    except ValueError:
+        try:
+            loop = asyncio.get_running_loop()
+            records = await loop.getaddrinfo(
+                hostname,
+                parsed.port or (443 if parsed.scheme == "https" else 80),
+                type=socket.SOCK_STREAM,
+            )
+            addresses = {record[4][0].split("%", 1)[0] for record in records}
+        except (socket.gaierror, OSError):
+            return False, "Hostname could not be resolved"
+
+    if not addresses or any(not _is_public_ip(address) for address in addresses):
+        return False, "URL resolves to a non-public network address"
+    return True, None
 
 
 # ===========================================
