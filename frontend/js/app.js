@@ -1083,7 +1083,17 @@ async function handleExistingUpload(e) {
 function pollSiteStatus(siteId) {
     const interval = setInterval(async () => {
         try {
-            const response = await fetch(`${API_BASE}/embed/status/${siteId}`);
+            const response = await fetch(`${API_BASE}/embed/status/${siteId}`, {
+                headers: getAuthHeaders(),
+            });
+            if (response.status === 401) {
+                const refreshed = await refreshAccessToken();
+                if (!refreshed) {
+                    clearInterval(interval);
+                    await logout();
+                }
+                return;
+            }
             const data = await response.json();
             
             if (data.status === 'completed' || data.status === 'failed') {

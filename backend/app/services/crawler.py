@@ -155,11 +155,16 @@ class CrawlerService:
                     self.errors.append(f"Bot protection/rate limited: {url}")
                     return None
                 elif response.status != 200:
-                    logger.debug(f"HTTP {response.status} for {url}")
+                    error = f"HTTP {response.status}: {current_url}"
+                    self.errors.append(error)
+                    logger.warning(error)
                     return None
                 
                 content_type = response.headers.get("content-type", "")
                 if "text/html" not in content_type:
+                    self.errors.append(
+                        f"Unsupported content type '{content_type}': {current_url}"
+                    )
                     return None
                 max_bytes = settings.CRAWL_MAX_RESPONSE_BYTES
                 content_length = response.headers.get("content-length")
@@ -201,6 +206,7 @@ class CrawlerService:
                 
                 # Skip pages with very little content
                 if len(text) < 100:
+                    self.errors.append(f"Page has too little text content: {current_url}")
                     return None
                 
                 return {
@@ -215,7 +221,9 @@ class CrawlerService:
                 }
                 
         except Exception as e:
-            logger.error(f"Error fetching {url}: {e}")
+            error = f"Error fetching {url}: {e}"
+            self.errors.append(error)
+            logger.error(error)
             return None
     
     def _extract_links(self, html: str, base_domain: str, current_url: str) -> List[str]:

@@ -323,6 +323,9 @@ async def _run_incremental_crawl_background(
             include_patterns=include_patterns,
             exclude_patterns=exclude_patterns
         )
+        if not pages:
+            errors = crawler.get_stats().get("error_messages") or []
+            raise RuntimeError(errors[0] if errors else "Crawler returned no pages")
 
         # URL is the stable page identity in the current schema. Reading the
         # existing set does not mutate MongoDB or FAISS.
@@ -396,6 +399,9 @@ async def _run_crawl_background(
             include_patterns=include_patterns,
             exclude_patterns=exclude_patterns
         )
+        if not pages:
+            errors = crawler.get_stats().get("error_messages") or []
+            raise RuntimeError(errors[0] if errors else "Crawler returned no pages")
         
         indexed_count = 0
         if pages:
