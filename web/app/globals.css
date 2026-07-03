@@ -6131,7 +6131,11 @@ pre,
 .subscription-history article { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; padding: 12px 0; border-bottom: 1px solid #f1f5f9; }
 .subscription-history article time { color: #64748b; font-size: 13px; }
 .subscription-history article p { grid-column: 1 / -1; margin: 2px 0 0; color: #64748b; }
-.subscription-upgrade-modal { width: min(1240px, calc(100vw - 32px)); }
+.sites-modal.subscription-upgrade-modal {
+  width: min(1240px, calc(100vw - 48px));
+  max-width: 1240px;
+  overflow-x: hidden;
+}
 .subscription-plan-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; padding: 28px 24px; }
 .subscription-plan-card { position: relative; display: block; min-height: 460px; padding: 0; overflow: visible; border: 1px solid #dbe3ef; border-radius: 22px; background: #fff; cursor: pointer; transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease; }
 .subscription-plan-card:hover:not(.current) { transform: translateY(-4px); border-color: #8ab9ff; box-shadow: 0 18px 36px rgba(15, 40, 90, .1); }
