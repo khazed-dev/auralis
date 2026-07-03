@@ -11,6 +11,8 @@ venv/
 
 # Logs
 *.log
+backend/test-result.txt
+backend/p0-test-result.txt
 
 # Local backups / temporary files
 *.save
@@ -24,3 +26,22 @@ backend/data/chroma_db/faiss_index.bak_*/
 # Editor / OS
 .vscode/
 .DS_Store
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.turbo/
+.vercel/
+*.tsbuildinfo
+.eslintcache
+npm-debug.log*
+
+# Test output
+coverage/
+playwright-report/
+test-results/
+
+# Design source assets copied to web/public for runtime
+docs/images/favicon.png
+docs/images/logo-auralis.png
