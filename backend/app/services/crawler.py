@@ -14,6 +14,10 @@ from app.core.security import validate_public_http_url
 from app.database import get_mongodb
 
 
+class CrawlCancelled(Exception):
+    """Raised when a persisted crawl job receives a cancellation request."""
+
+
 class CrawlerService:
     """Service for crawling websites and extracting content."""
     
@@ -75,6 +79,13 @@ class CrawlerService:
             headers={"User-Agent": "SiteChat-Crawler/1.0"}
         ) as session:
             while queue and len(self.pages) < max_pages:
+                if self.job_id:
+                    mongodb = await get_mongodb()
+                    job = await mongodb.get_crawl_job(self.job_id)
+                    if job and job.get("status") == "cancelled":
+                        logger.info(f"Crawl job {self.job_id} cancelled")
+                        raise CrawlCancelled("Crawl cancelled by user")
+
                 # Get next URL
                 url = queue.pop(0)
                 

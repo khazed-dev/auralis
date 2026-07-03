@@ -1889,6 +1889,9 @@ function getCrawlingTabContent() {
                     <span class="crawl-status-title">Crawling in progress...</span>
                     <span class="crawl-status-detail" id="crawl-status-pages">0 pages crawled</span>
                 </div>
+                <button type="button" class="btn btn-danger btn-sm" id="crawl-stop-btn">
+                    Stop crawl
+                </button>
             </div>
             
             <div class="crawl-quick-actions">
@@ -7390,6 +7393,11 @@ function initCrawlingTabHandlers() {
     if (crawlNowBtn) {
         crawlNowBtn.onclick = triggerCrawlNow;
     }
+
+    const stopBtn = document.getElementById('crawl-stop-btn');
+    if (stopBtn) {
+        stopBtn.onclick = stopCrawlNow;
+    }
 }
 
 function populateCrawlScheduleForm(data) {
@@ -7562,10 +7570,48 @@ async function triggerCrawlNow() {
     }
 }
 
+async function stopCrawlNow() {
+    if (!currentDetailSite) return;
+    if (!confirm('Stop the active crawl for this site?')) return;
+
+    const siteId = currentDetailSite.site_id;
+    const btn = document.getElementById('crawl-stop-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Stopping...';
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/sites/${siteId}/crawl-cancel`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(formatApiErrorDetail(data));
+        }
+        updateCrawlStatusBanner(false);
+        if (crawlStatusPollInterval) {
+            clearInterval(crawlStatusPollInterval);
+            crawlStatusPollInterval = null;
+        }
+        await loadCrawlSchedule(siteId);
+    } catch (error) {
+        console.error('Failed to stop crawl:', error);
+        alert(error.message || 'Failed to stop crawl.');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Stop crawl';
+        }
+    }
+}
+
 function updateCrawlStatusBanner(isCrawling, pagesCount = 0) {
     const banner = document.getElementById('crawl-status-banner');
     const pagesEl = document.getElementById('crawl-status-pages');
     const crawlBtn = document.getElementById('crawl-now-btn');
+    const stopBtn = document.getElementById('crawl-stop-btn');
     
     if (banner) {
         banner.style.display = isCrawling ? 'flex' : 'none';
@@ -7577,6 +7623,11 @@ function updateCrawlStatusBanner(isCrawling, pagesCount = 0) {
     
     if (crawlBtn) {
         crawlBtn.disabled = isCrawling;
+    }
+    if (stopBtn) {
+        stopBtn.style.display = isCrawling ? '' : 'none';
+        stopBtn.disabled = false;
+        stopBtn.textContent = 'Stop crawl';
     }
 }
 

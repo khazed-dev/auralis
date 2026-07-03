@@ -3,6 +3,7 @@ Sites API routes for managing chatbot sites.
 """
 from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import List, Optional
+from datetime import datetime
 from loguru import logger
 
 from app.database import get_mongodb
@@ -110,6 +111,23 @@ async def delete_site(site_id: str, user: dict = Depends(require_auth)):
     url = site.get("url")
     
     try:
+        # Cancel durable/in-flight crawl work before deleting tenant data.
+        if getattr(db, "db", None) is not None:
+            await db.db.crawl_jobs.update_many(
+                {
+                    "$or": [{"site_id": site_id}, {"target_url": url}],
+                    "status": {"$in": ["queued", "running"]},
+                },
+                {
+                    "$set": {
+                        "status": "cancelled",
+                        "updated_at": datetime.utcnow(),
+                        "completed_at": datetime.utcnow(),
+                    },
+                    "$unset": {"queue_payload": ""},
+                    "$push": {"errors": "Cancelled because site was deleted"},
+                },
+            )
         await db.delete_site(site_id)
         
         try:

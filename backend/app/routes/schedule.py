@@ -10,7 +10,7 @@ from app.database import get_mongodb
 from app.config import settings
 from app.routes.dependencies import require_site_manage, require_site_view
 from app.services.crawl_queue import get_crawl_queue
-from app.services.crawler import CrawlerService
+from app.services.crawler import CrawlerService, CrawlCancelled
 from app.services.indexer import IndexerService
 from app.services.scheduler import get_scheduler
 from app.models.schemas import (
@@ -22,6 +22,12 @@ from app.models.schemas import (
 )
 
 router = APIRouter(tags=["Schedule"])
+
+
+async def _raise_if_crawl_cancelled(db, job_id: str) -> None:
+    job = await db.get_crawl_job(job_id)
+    if job and job.get("status") == "cancelled":
+        raise CrawlCancelled("Crawl cancelled by user")
 
 
 async def handle_queued_crawl(job_id: str, payload: dict) -> None:
@@ -326,6 +332,7 @@ async def _run_incremental_crawl_background(
         if not pages:
             errors = crawler.get_stats().get("error_messages") or []
             raise RuntimeError(errors[0] if errors else "Crawler returned no pages")
+        await _raise_if_crawl_cancelled(db, job_id)
 
         # URL is the stable page identity in the current schema. Reading the
         # existing set does not mutate MongoDB or FAISS.
@@ -368,6 +375,8 @@ async def _run_incremental_crawl_background(
             f"{len(pages) if pages else 0} scanned, "
             f"{len(discovered_new_pages)} new, {indexed_count} indexed"
         )
+    except CrawlCancelled:
+        logger.info(f"Incremental crawl job {job_id} cancelled")
     except Exception as e:
         logger.error(f"Incremental crawl job {job_id} failed: {e}")
         await db.update_crawl_job(
@@ -402,6 +411,7 @@ async def _run_crawl_background(
         if not pages:
             errors = crawler.get_stats().get("error_messages") or []
             raise RuntimeError(errors[0] if errors else "Crawler returned no pages")
+        await _raise_if_crawl_cancelled(db, job_id)
         
         indexed_count = 0
         if pages:
@@ -423,6 +433,8 @@ async def _run_crawl_background(
         
         logger.info(f"Manual crawl job {job_id} completed for site {site_id}")
         
+    except CrawlCancelled:
+        logger.info(f"Manual crawl job {job_id} cancelled")
     except Exception as e:
         logger.error(f"Manual crawl job {job_id} failed: {e}")
         await db.update_crawl_job(
@@ -485,4 +497,45 @@ async def get_crawl_status(
     return {
         "is_crawling": False,
         "last_crawl": last_job
+    }
+
+
+@router.post("/api/sites/{site_id}/crawl-cancel")
+async def cancel_site_crawl(
+    site_id: str,
+    current_user: dict = Depends(require_site_manage),
+):
+    """Cancel queued/running crawl jobs for one site."""
+    db = await get_mongodb()
+    site = await db.get_site(site_id)
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    now = datetime.utcnow()
+    result = await db.db.crawl_jobs.update_many(
+        {
+            "$or": [
+                {"site_id": site_id},
+                {"target_url": site.get("url")},
+            ],
+            "status": {"$in": ["queued", "running"]},
+        },
+        {
+            "$set": {
+                "status": "cancelled",
+                "updated_at": now,
+                "completed_at": now,
+            },
+            "$unset": {"queue_payload": ""},
+            "$push": {"errors": "Cancelled by user"},
+        },
+    )
+    return {
+        "success": True,
+        "cancelled_jobs": result.modified_count,
+        "message": (
+            "Crawl cancellation requested"
+            if result.modified_count
+            else "No active crawl job"
+        ),
     }
