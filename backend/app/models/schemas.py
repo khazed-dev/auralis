@@ -129,8 +129,8 @@ class SiteAppearanceConfig(BaseModel):
     bot_avatar_url: Optional[str] = Field(default=None, description="Custom bot avatar URL")
     position: str = Field(default="bottom-right", description="Widget position: bottom-left or bottom-right")
     # White-label options
-    hide_branding: bool = Field(default=False, description="Hide 'Powered by SiteChat' branding")
-    custom_branding_text: Optional[str] = Field(default=None, description="Custom branding text (replaces 'Powered by SiteChat')")
+    hide_branding: bool = Field(default=False, description="Hide 'Powered by Auralis AI' branding")
+    custom_branding_text: Optional[str] = Field(default=None, description="Custom branding text (replaces 'Powered by Auralis AI')")
     custom_branding_url: Optional[str] = Field(default=None, description="URL for custom branding link")
 
 
@@ -732,16 +732,16 @@ class CrawlScheduleResponse(BaseModel):
 
 class PlatformWhiteLabelConfig(BaseModel):
     """Platform-level white-label configuration for dashboard."""
-    app_name: str = Field(default="SiteChat", description="Application name")
+    app_name: str = Field(default="Auralis AI", description="Application name")
     logo_url: Optional[str] = Field(default=None, description="Custom logo URL")
     favicon_url: Optional[str] = Field(default=None, description="Custom favicon URL")
     primary_color: str = Field(default="#3366cc", description="Primary brand color")
     secondary_color: str = Field(default="#16a34a", description="Secondary brand color")
-    login_title: str = Field(default="SiteChat", description="Login page title")
+    login_title: str = Field(default="Auralis AI", description="Login page title")
     login_subtitle: str = Field(default="AI-Powered Customer Support", description="Login page subtitle")
     footer_text: Optional[str] = Field(default=None, description="Custom footer text")
     support_email: Optional[str] = Field(default=None, description="Support email address")
-    hide_sitechat_branding: bool = Field(default=False, description="Hide all SiteChat branding")
+    hide_sitechat_branding: bool = Field(default=False, description="Hide all Auralis AI branding")
 
 
 class PlatformWhiteLabelUpdate(BaseModel):

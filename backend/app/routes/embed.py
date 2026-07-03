@@ -217,7 +217,7 @@ async def setup_chatbot(
     
     # Generate embed script with optional SRI
     if sri_hash:
-        embed_script = f'''<!-- SiteChat Widget (Secure) -->
+        embed_script = f'''<!-- Auralis AI Widget (Secure) -->
 <script>
 (function() {{
   var s = document.createElement('script');
@@ -231,7 +231,7 @@ async def setup_chatbot(
 }})();
 </script>'''
     else:
-        embed_script = f'''<!-- SiteChat Widget -->
+        embed_script = f'''<!-- Auralis AI Widget -->
 <script>
 (function() {{
   var s = document.createElement('script');
@@ -305,7 +305,7 @@ async def get_embed_script(
     
     # Generate embed script with optional SRI
     if sri_hash:
-        embed_script = f'''<!-- SiteChat Widget (Secure) -->
+        embed_script = f'''<!-- Auralis AI Widget (Secure) -->
 <script>
 (function() {{
   var s = document.createElement('script');
@@ -319,7 +319,7 @@ async def get_embed_script(
 }})();
 </script>'''
     else:
-        embed_script = f'''<!-- SiteChat Widget -->
+        embed_script = f'''<!-- Auralis AI Widget -->
 <script>
 (function() {{
   var s = document.createElement('script');

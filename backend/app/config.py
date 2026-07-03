@@ -1,5 +1,5 @@
 """
-Configuration settings for the SiteChat Platform.
+Configuration settings for the Auralis AI Platform.
 Supports multiple providers for LLM, embeddings, vector store, database, storage, and cache.
 """
 import secrets
@@ -11,7 +11,7 @@ from typing import Literal, Optional, List
 
 class Settings(BaseSettings):
     # App settings
-    APP_NAME: str = "SiteChat"
+    APP_NAME: str = "Auralis AI"
     DEBUG: bool = False
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
     SITE_URL: str = "http://localhost:8000"
