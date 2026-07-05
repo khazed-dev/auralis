@@ -40,6 +40,13 @@ type Audit = {
   resource_id: string; reason?: string; created_at: string;
 };
 
+const PLAN_LIMIT_LABELS: Record<string, string> = {
+  sites: "Website",
+  members: "Thành viên",
+  messages: "Tin nhắn AI",
+  crawl_pages: "Trang crawl",
+};
+
 const money = (value: number | null | undefined) =>
   value === null || value === undefined ? "Liên hệ" : `${value.toLocaleString("vi-VN")} VNĐ`;
 
@@ -175,7 +182,7 @@ function PlansView() {
     <ErrorBox value={error} />
     <section className="platform-card-grid">{plans.map(plan => <article className={`platform-plan-card ${!plan.is_active ? "archived" : ""}`} key={plan.id}>
       <header><div><span>{plan.key} · v{plan.version}</span><h2>{plan.name}</h2></div>{plan.badge && <b>{plan.badge}</b>}</header><strong>{money(plan.monthly_price)}{plan.monthly_price !== null && <small>/tháng</small>}</strong><p>{plan.description}</p>
-      <div className="platform-plan-limits">{Object.entries(plan.limits).map(([key, value]) => <span key={key}>{key}<b>{value === null ? "∞" : value.toLocaleString("vi-VN")}</b></span>)}</div>
+      <div className="platform-plan-limits">{Object.entries(plan.limits).map(([key, value]) => <span key={key}>{PLAN_LIMIT_LABELS[key] || key}<b>{value === null ? "∞" : value.toLocaleString("vi-VN")}</b></span>)}</div>
       <footer><span className={`platform-chip ${plan.is_active ? "active" : "expired"}`}>{plan.is_active ? "Đang hoạt động" : "Đã lưu trữ"}</span><div><button onClick={() => setEditing(plan)}>Chỉnh sửa</button>{plan.is_active && <button className="danger" onClick={() => void archive(plan)}>Lưu trữ</button>}</div></footer>
     </article>)}</section>
     {editing && <PlanModal value={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSubmit={save} />}
