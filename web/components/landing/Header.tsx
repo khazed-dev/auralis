@@ -31,7 +31,7 @@ export function Header() {
           <a className="sign-in" href="/login">
             Đăng nhập
           </a>
-          <a className="button button-pill button-small" href="/login">
+          <a className="button button-pill button-small" href="/register">
             Bắt đầu ngay
           </a>
         </div>

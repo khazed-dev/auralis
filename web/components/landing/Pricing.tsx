@@ -39,7 +39,7 @@ const plans = [
       "Truy cập API",
       "Tùy chỉnh thương hiệu",
     ],
-    cta: "Liên hệ tư vấn",
+    cta: "Chọn gói Doanh nghiệp",
   },
   {
     key: "custom",

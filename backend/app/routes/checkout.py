@@ -17,9 +17,10 @@ from app.services.payments import (
     build_sepay_checkout, generate_access_token, generate_order_id, hash_token,
     provision_checkout_order, public_order, utcnow,
 )
+from app.services.subscriptions import PLAN_MONTHLY_PRICES
 
 router = APIRouter(prefix="/api/checkout", tags=["checkout"])
-PLAN_PRICES = {"starter": 0, "growth": 2_400_000, "business": 9_800_000}
+PLAN_PRICES = PLAN_MONTHLY_PRICES
 
 
 def _is_expired(value: Optional[datetime]) -> bool:

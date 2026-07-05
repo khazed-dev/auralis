@@ -1,11 +1,14 @@
 import base64
 import hashlib
 import hmac
+from datetime import datetime, timedelta
 
 from app.providers.database import MockDatabaseProvider
 from app.routes.checkout import generate_checkout_password
 from app.services.auth import AuthService, UserCreate
-from app.services.payments import SEPAY_SIGNED_FIELDS, build_sepay_checkout
+from app.services.payments import (
+    SEPAY_SIGNED_FIELDS, build_sepay_checkout, encrypt_credential, public_order,
+)
 from app.config import settings
 
 
@@ -44,4 +47,22 @@ def test_sepay_checkout_signature_uses_official_field_order(monkeypatch):
     assert checkout["url"] == "https://pay.sepay.vn/v1/checkout/init"
     assert fields["payment_method"] == "BANK_TRANSFER"
     assert fields["signature"] == expected
+
+
+def test_completed_order_accepts_naive_mongodb_credential_expiry(monkeypatch):
+    monkeypatch.setattr(settings, "PAYMENT_CREDENTIAL_ENCRYPTION_KEY", "test-payment-key")
+    result = public_order({
+        "order_id": "AUR12345678",
+        "status": "completed",
+        "plan": "growth",
+        "email": "paid@example.com",
+        "subtotal": 2_400_000,
+        "discount": 0,
+        "vat": 240_000,
+        "total": 2_640_000,
+        "password_encrypted": encrypt_credential("Au!7password"),
+        "credentials_expires_at": datetime.utcnow() + timedelta(hours=1),
+    }, include_credentials=True)
+
+    assert result["password"] == "Au!7password"
 
