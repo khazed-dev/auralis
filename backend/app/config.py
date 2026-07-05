@@ -179,6 +179,17 @@ class Settings(BaseSettings):
     PLATFORM_ADMIN_NAME: str = "Auralis Platform Admin"
     # Dedicated secret used to encrypt tenant BYOK credentials at rest.
     BYOK_ENCRYPTION_KEY: str = ""
+
+    # ===========================================
+    # SePay payment settings
+    # ===========================================
+    SEPAY_ENABLED: bool = False
+    SEPAY_WEBHOOK_SECRET: str = ""
+    SEPAY_BANK_CODE: str = ""
+    SEPAY_BANK_ACCOUNT: str = ""
+    SEPAY_ACCOUNT_NAME: str = ""
+    PAYMENT_CREDENTIAL_ENCRYPTION_KEY: str = ""
+    PAYMENT_ORDER_EXPIRE_MINUTES: int = 30
     
     # Password policy
     MIN_PASSWORD_LENGTH: int = 8
