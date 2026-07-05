@@ -295,6 +295,44 @@ class TestExtractLinks:
 
 class TestFetchPage:
     """Tests for page fetching functionality."""
+
+    @pytest.mark.asyncio
+    async def test_fetch_page_reads_all_streamed_chunks(self, crawler):
+        """Content after the first network chunk must not be discarded."""
+        first_chunk = b"<html><head><title>Chunked page</title></head><body><main>"
+        second_chunk = ("Useful content from a later chunk. " * 20).encode()
+        last_chunk = b"</main></body></html>"
+
+        class ChunkedContent:
+            async def iter_chunked(self, _size):
+                for chunk in (first_chunk, second_chunk, last_chunk):
+                    yield chunk
+
+        class Response:
+            status = 200
+            headers = {"content-type": "text/html; charset=utf-8"}
+            charset = "utf-8"
+            content = ChunkedContent()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+        class Session:
+            async def get(self, _url, allow_redirects=False):
+                return Response()
+
+        with patch(
+            "app.services.crawler.validate_public_http_url",
+            AsyncMock(return_value=(True, None)),
+        ):
+            result = await crawler._fetch_page(Session(), "https://example.com/page")
+
+        assert result is not None
+        assert "later chunk" in result["content"]
+        assert result["metadata"]["content_length"] > 100
     
     @pytest.mark.asyncio
     async def test_fetch_page_success(self, crawler, sample_html):

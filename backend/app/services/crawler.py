@@ -198,10 +198,15 @@ class CrawlerService:
                 if content_length and int(content_length) > max_bytes:
                     self.errors.append(f"Page too large: {current_url}")
                     return None
-                raw = await response.content.read(max_bytes + 1)
-                if len(raw) > max_bytes:
-                    self.errors.append(f"Page too large: {current_url}")
-                    return None
+                chunks = []
+                total_bytes = 0
+                async for chunk in response.content.iter_chunked(64 * 1024):
+                    total_bytes += len(chunk)
+                    if total_bytes > max_bytes:
+                        self.errors.append(f"Page too large: {current_url}")
+                        return None
+                    chunks.append(chunk)
+                raw = b"".join(chunks)
                 encoding = response.charset or "utf-8"
                 html = raw.decode(encoding, errors="replace")
                 
