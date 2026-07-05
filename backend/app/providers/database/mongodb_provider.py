@@ -110,6 +110,14 @@ class MongoDBProvider(BaseDatabaseProvider):
             )
             await self.db.promo_codes.create_index("code", unique=True)
             await self.db.checkout_orders.create_index("order_id", unique=True)
+            await self.db.checkout_orders.create_index(
+                "access_token_hash",
+                unique=True,
+                partialFilterExpression={"access_token_hash": {"$type": "string"}},
+            )
+            await self.db.checkout_orders.create_index([("status", 1), ("expires_at", 1)])
+            await self.db.payment_transactions.create_index("transaction_id", unique=True)
+            await self.db.payment_transactions.create_index("order_id")
             logger.info("MongoDB indexes created")
         except Exception as e:
             logger.warning(f"Index creation warning: {e}")
