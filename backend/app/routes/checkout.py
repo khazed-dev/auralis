@@ -1,8 +1,6 @@
 """Public checkout, SePay confirmation, and promo administration."""
 from datetime import datetime, timedelta, timezone
-import hashlib
 import hmac
-import json
 import time
 from typing import Literal, Optional
 
@@ -16,7 +14,7 @@ from app.config import settings
 from app.database import get_mongodb
 from app.routes.auth import require_account_admin
 from app.services.payments import (
-    generate_access_token, generate_order_id, hash_token,
+    build_sepay_checkout, generate_access_token, generate_order_id, hash_token,
     provision_checkout_order, public_order, utcnow,
 )
 
@@ -107,8 +105,9 @@ async def complete_checkout(body: CheckoutRequest):
     if not settings.PAYMENT_CREDENTIAL_ENCRYPTION_KEY:
         raise HTTPException(status_code=503, detail="Mã hóa thông tin tài khoản chưa được cấu hình")
     if pricing["total"] > 0 and not all((
-        settings.SEPAY_ENABLED, settings.SEPAY_WEBHOOK_SECRET,
-        settings.SEPAY_BANK_CODE, settings.SEPAY_BANK_ACCOUNT,
+        settings.SEPAY_ENABLED, settings.SEPAY_MERCHANT_ID,
+        settings.SEPAY_MERCHANT_SECRET_KEY, settings.SEPAY_IPN_SECRET_KEY,
+        settings.SEPAY_CHECKOUT_URL,
     )):
         raise HTTPException(status_code=503, detail="Thanh toán SePay chưa được cấu hình đầy đủ")
 
@@ -133,7 +132,8 @@ async def complete_checkout(body: CheckoutRequest):
     order["_id"] = inserted.inserted_id
     if order["total"] == 0:
         order = await provision_checkout_order(db, order)
-    response = public_order(order, include_credentials=True)
+    checkout = build_sepay_checkout(order) if order["total"] > 0 else None
+    response = public_order(order, include_credentials=True, checkout=checkout)
     response["access_token"] = access_token
     return response
 
@@ -155,37 +155,29 @@ async def checkout_order_status(order_id: str, access_token: str = Query(min_len
     return public_order(order, include_credentials=True)
 
 
-@router.post("/sepay/webhook")
-async def sepay_webhook(request: Request):
-    if not settings.SEPAY_ENABLED or not settings.SEPAY_WEBHOOK_SECRET:
+@router.post("/sepay/ipn")
+async def sepay_ipn(request: Request):
+    """Process authenticated Payment Gateway IPN notifications."""
+    if not settings.SEPAY_ENABLED or not settings.SEPAY_IPN_SECRET_KEY:
         raise HTTPException(status_code=503, detail="SePay is disabled")
-    raw = await request.body()
-    timestamp = request.headers.get("X-SePay-Timestamp", "")
-    signature = request.headers.get("X-SePay-Signature", "")
+    supplied_secret = request.headers.get("X-Secret-Key", "")
+    if not hmac.compare_digest(supplied_secret, settings.SEPAY_IPN_SECRET_KEY):
+        raise HTTPException(status_code=401, detail="Invalid IPN secret")
+    payload = await request.json()
     try:
-        timestamp_int = int(timestamp)
-    except ValueError as exc:
-        raise HTTPException(status_code=401, detail="Invalid timestamp") from exc
+        timestamp_int = int(payload.get("timestamp") or 0)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid timestamp") from exc
     if abs(int(time.time()) - timestamp_int) > 300:
         raise HTTPException(status_code=401, detail="Request expired")
-    expected = "sha256=" + hmac.new(
-        settings.SEPAY_WEBHOOK_SECRET.encode(),
-        timestamp.encode() + b"." + raw,
-        hashlib.sha256,
-    ).hexdigest()
-    if not hmac.compare_digest(expected, signature):
-        raise HTTPException(status_code=401, detail="Invalid signature")
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail="Invalid JSON") from exc
-
-    if payload.get("transferType") != "in":
+    if payload.get("notification_type") != "ORDER_PAID":
         return {"success": True}
-    transaction_id = str(payload.get("id") or "")
-    order_id = str(payload.get("code") or "").upper()
+    sepay_order = payload.get("order") or {}
+    transaction = payload.get("transaction") or {}
+    transaction_id = str(transaction.get("transaction_id") or transaction.get("id") or "")
+    order_id = str(sepay_order.get("order_invoice_number") or "").upper()
     if not transaction_id or not order_id:
-        return {"success": True}
+        raise HTTPException(status_code=400, detail="Missing order or transaction identifier")
 
     db = await get_mongodb()
     order = await db.db.checkout_orders.find_one({"order_id": order_id})
@@ -211,10 +203,19 @@ async def sepay_webhook(request: Request):
             }}, upsert=True,
         )
         return {"success": True}
-    matches = (
-        str(payload.get("accountNumber") or "") == settings.SEPAY_BANK_ACCOUNT
-        and int(payload.get("transferAmount") or 0) == int(order["total"])
-    )
+    try:
+        paid_amount = int(float(sepay_order.get("order_amount") or 0))
+        transaction_amount = int(float(transaction.get("transaction_amount") or 0))
+    except (TypeError, ValueError):
+        paid_amount = transaction_amount = -1
+    matches = all((
+        sepay_order.get("order_status") == "CAPTURED",
+        sepay_order.get("order_currency") == "VND",
+        transaction.get("transaction_status") == "APPROVED",
+        transaction.get("transaction_currency") == "VND",
+        paid_amount == int(order["total"]),
+        transaction_amount == int(order["total"]),
+    ))
     if not matches:
         await db.db.payment_transactions.update_one(
             {"transaction_id": transaction_id},

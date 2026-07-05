@@ -1,6 +1,12 @@
+import base64
+import hashlib
+import hmac
+
 from app.providers.database import MockDatabaseProvider
 from app.routes.checkout import generate_checkout_password
 from app.services.auth import AuthService, UserCreate
+from app.services.payments import SEPAY_SIGNED_FIELDS, build_sepay_checkout
+from app.config import settings
 
 
 async def test_generated_checkout_password_can_authenticate():
@@ -16,4 +22,26 @@ async def test_generated_checkout_password_can_authenticate():
 
     assert await auth.authenticate_user("checkout@example.com", password)
     assert await auth.authenticate_user("checkout@example.com", password + "x") is None
+
+
+def test_sepay_checkout_signature_uses_official_field_order(monkeypatch):
+    monkeypatch.setattr(settings, "SEPAY_MERCHANT_ID", "SP-LIVE-TEST")
+    monkeypatch.setattr(settings, "SEPAY_MERCHANT_SECRET_KEY", "merchant-secret")
+    monkeypatch.setattr(settings, "SEPAY_CHECKOUT_URL", "https://pay.sepay.vn/v1/checkout/init")
+    monkeypatch.setattr(settings, "PAYMENT_RETURN_BASE_URL", "https://auralis.example")
+    checkout = build_sepay_checkout({
+        "order_id": "AUR12345678",
+        "plan": "growth",
+        "total": 2_640_000,
+    })
+
+    fields = checkout["fields"]
+    signed = ",".join(f"{name}={fields[name]}" for name in SEPAY_SIGNED_FIELDS if name in fields)
+    expected = base64.b64encode(
+        hmac.new(b"merchant-secret", signed.encode(), hashlib.sha256).digest()
+    ).decode()
+
+    assert checkout["url"] == "https://pay.sepay.vn/v1/checkout/init"
+    assert fields["payment_method"] == "BANK_TRANSFER"
+    assert fields["signature"] == expected
 

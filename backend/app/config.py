@@ -184,12 +184,20 @@ class Settings(BaseSettings):
     # SePay payment settings
     # ===========================================
     SEPAY_ENABLED: bool = False
+    SEPAY_ENVIRONMENT: Literal["sandbox", "production"] = "sandbox"
+    SEPAY_MERCHANT_ID: str = ""
+    SEPAY_MERCHANT_SECRET_KEY: str = ""
+    SEPAY_IPN_SECRET_KEY: str = ""
+    SEPAY_API_BASE_URL: str = "https://pgapi-sandbox.sepay.vn"
+    SEPAY_CHECKOUT_URL: str = "https://pay-sandbox.sepay.vn/v1/checkout/init"
+    # Legacy direct-bank webhook settings. Kept only for backwards-compatible env loading.
     SEPAY_WEBHOOK_SECRET: str = ""
     SEPAY_BANK_CODE: str = ""
     SEPAY_BANK_ACCOUNT: str = ""
     SEPAY_ACCOUNT_NAME: str = ""
     PAYMENT_CREDENTIAL_ENCRYPTION_KEY: str = ""
     PAYMENT_ORDER_EXPIRE_MINUTES: int = 30
+    PAYMENT_RETURN_BASE_URL: str = ""
     
     # Password policy
     MIN_PASSWORD_LENGTH: int = 8

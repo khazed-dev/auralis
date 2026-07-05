@@ -13,11 +13,11 @@ const plans = {
 } as const;
 type PlanKey = keyof typeof plans;
 type Quote = { subtotal: number; discount: number; vat: number; total: number };
-type Payment = { bank_code: string; account_number: string; account_name: string; amount: number; content: string };
+type SePayCheckout = { url: string; fields: Record<string, string> };
 type Order = {
   order_id: string; access_token?: string; status: "pending" | "processing" | "completed" | "expired";
   plan: PlanKey; trial_ends_at?: string; expires_at?: string; email: string;
-  password?: string; payment_method: string; total: number; payment?: Payment;
+  password?: string; payment_method: string; total: number; checkout?: SePayCheckout;
 };
 const money = (value: number) => `${value.toLocaleString("vi-VN")} VNĐ`;
 
@@ -41,6 +41,23 @@ export function CheckoutPage() {
       setError("");
     }).catch((reason: Error) => setError(reason.message));
   }, [query]);
+
+  useEffect(() => {
+    const callbackOrder = params.get("order");
+    if (!callbackOrder || order) return;
+    const accessToken = window.sessionStorage.getItem(`auralis-payment:${callbackOrder}`);
+    if (!accessToken) {
+      setError("Không tìm thấy phiên thanh toán. Vui lòng kiểm tra email hoặc liên hệ hỗ trợ.");
+      return;
+    }
+    fetch(`${API_BASE}/checkout/orders/${callbackOrder}?access_token=${encodeURIComponent(accessToken)}`, { cache: "no-store" })
+      .then(async response => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || "Không thể kiểm tra giao dịch.");
+        setOrder({ ...body, access_token: accessToken });
+      })
+      .catch((reason: Error) => setError(reason.message));
+  }, [params, order]);
 
   useEffect(() => {
     if (!order || !["pending", "processing"].includes(order.status) || !order.access_token) return;
@@ -74,7 +91,26 @@ export function CheckoutPage() {
       setError(typeof body.detail === "string" ? body.detail : "Không thể tạo đơn thanh toán.");
       return;
     }
-    setOrder(body as Order);
+    const created = body as Order;
+    if (created.access_token) {
+      window.sessionStorage.setItem(`auralis-payment:${created.order_id}`, created.access_token);
+    }
+    if (created.checkout) {
+      const gatewayForm = document.createElement("form");
+      gatewayForm.method = "POST";
+      gatewayForm.action = created.checkout.url;
+      Object.entries(created.checkout.fields).forEach(([name, value]) => {
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = name;
+        input.value = value;
+        gatewayForm.appendChild(input);
+      });
+      document.body.appendChild(gatewayForm);
+      gatewayForm.submit();
+      return;
+    }
+    setOrder(created);
   }
 
   if (order?.status === "completed") return <CheckoutSuccess result={order} planName={plans[order.plan].name} />;
@@ -101,7 +137,10 @@ export function CheckoutPage() {
         </div></section>
         <section className="checkout-card payment-card"><h2>Phương thức thanh toán</h2>
           <div className="payment-option selected">◉　VietQR / Chuyển khoản ngân hàng <span>QR</span></div>
-          <div className="payment-expanded bank-panel"><p>Mã QR chứa sẵn số tiền và nội dung chuyển khoản sẽ xuất hiện sau khi tạo đơn.</p><small>Thanh toán thẻ sẽ được bổ sung sau.</small></div>
+          <div className="payment-expanded bank-panel"><p>SePay sẽ tạo mã QR chứa sẵn số tiền và nội dung chuyển khoản sau khi bạn tiếp tục.</p></div>
+          <button type="button" className="payment-option payment-option-disabled" disabled aria-disabled="true">
+            ○　Thẻ tín dụng / ghi nợ <span>Sắp ra mắt</span>
+          </button>
         </section>
         {error && <p className="checkout-error">{error}</p>}
         <label className="checkout-terms"><input name="accepted_terms" type="checkbox" required /> Tôi đồng ý với Điều khoản dịch vụ và Chính sách bảo mật.</label>
@@ -114,20 +153,9 @@ export function CheckoutPage() {
 
 function PaymentWaiting({ order }: { order: Order }) {
   if (order.status === "expired") return <div className="checkout-success-page"><main className="success-card"><h1>Đơn hàng đã hết hạn</h1><p>Vui lòng quay lại và tạo đơn thanh toán mới.</p><div className="success-actions"><Link href={`/checkout?plan=${order.plan}`}>Tạo lại đơn</Link></div></main></div>;
-  const payment = order.payment;
-  const qrUrl = payment ? `https://vietqr.app/img?acc=${encodeURIComponent(payment.account_number)}&bank=${encodeURIComponent(payment.bank_code)}&amount=${payment.amount}&des=${encodeURIComponent(payment.content)}` : "";
   return <div className="checkout-success-page"><main className="success-card payment-waiting-card">
-    <h1>Quét mã để thanh toán</h1><p>Đơn hàng <strong>#{order.order_id}</strong> đang chờ chuyển khoản.</p>
-    {payment && <section>
-      {/* External VietQR image is intentionally rendered as a normal img. */}
-      <img src={qrUrl} alt={`VietQR cho đơn ${order.order_id}`} width={280} height={280} />
-      <span>Ngân hàng <b>{payment.bank_code}</b></span>
-      <span>Số tài khoản <b>{payment.account_number}</b></span>
-      <span>Chủ tài khoản <b>{payment.account_name}</b></span>
-      <span>Số tiền <b>{money(payment.amount)}</b></span>
-      <span>Nội dung <b>{payment.content}</b></span>
-    </section>}
-    <p>Hệ thống đang tự động kiểm tra giao dịch. Không đóng trang này.</p>
+    <h1>Đang xác nhận thanh toán</h1><p>Đơn hàng <strong>#{order.order_id}</strong> đã quay về từ SePay.</p>
+    <p>Hệ thống đang chờ IPN xác nhận giao dịch. Trang sẽ tự động cập nhật.</p>
   </main></div>;
 }
 
