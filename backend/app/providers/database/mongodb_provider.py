@@ -118,6 +118,14 @@ class MongoDBProvider(BaseDatabaseProvider):
             await self.db.checkout_orders.create_index([("status", 1), ("expires_at", 1)])
             await self.db.payment_transactions.create_index("transaction_id", unique=True)
             await self.db.payment_transactions.create_index("order_id")
+            await self.db.plans.create_index("key", unique=True)
+            await self.db.plans.create_index([("is_public", 1), ("is_active", 1), ("display_order", 1)])
+            await self.db.platform_requests.create_index([("status", 1), ("created_at", -1)])
+            await self.db.platform_requests.create_index([("customer_id", 1), ("created_at", -1)])
+            await self.db.platform_audit_logs.create_index([("created_at", -1)])
+            await self.db.platform_audit_logs.create_index(
+                [("resource_type", 1), ("resource_id", 1), ("created_at", -1)]
+            )
             logger.info("MongoDB indexes created")
         except Exception as e:
             logger.warning(f"Index creation warning: {e}")

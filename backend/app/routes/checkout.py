@@ -17,12 +17,9 @@ from app.services.payments import (
     build_sepay_checkout, generate_access_token, generate_order_id, hash_token,
     provision_checkout_order, public_order, utcnow,
 )
-from app.services.subscriptions import PLAN_MONTHLY_PRICES
+from app.services.plans import plan_snapshot, require_plan
 
 router = APIRouter(prefix="/api/checkout", tags=["checkout"])
-PLAN_PRICES = PLAN_MONTHLY_PRICES
-
-
 def _is_expired(value: Optional[datetime]) -> bool:
     if not value:
         return False
@@ -38,10 +35,18 @@ def generate_checkout_password() -> str:
 
 class PromoCreate(BaseModel):
     code: str = Field(min_length=3, max_length=40)
-    percent_off: int = Field(ge=1, le=100)
+    percent_off: Optional[int] = Field(default=None, ge=1, le=100)
+    discount_type: Literal["percent", "fixed"] = "percent"
+    discount_value: Optional[int] = Field(default=None, ge=1)
     active: bool = True
+    starts_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
     max_redemptions: Optional[int] = Field(default=None, ge=1)
+    max_per_customer: Optional[int] = Field(default=None, ge=1)
+    first_purchase_only: bool = False
+    minimum_amount: int = Field(default=0, ge=0)
+    applicable_plan_keys: list[str] = Field(default_factory=list)
+    applicable_order_types: list[Literal["signup", "upgrade", "renewal"]] = Field(default_factory=list)
 
     @field_validator("code")
     @classmethod
@@ -50,7 +55,7 @@ class PromoCreate(BaseModel):
 
 
 class CheckoutRequest(BaseModel):
-    plan: Literal["starter", "growth", "business"]
+    plan: str = Field(min_length=2, max_length=40)
     email: EmailStr
     company_name: str = Field(min_length=2, max_length=150)
     promo_code: Optional[str] = None
@@ -61,14 +66,23 @@ class CheckoutRequest(BaseModel):
 def public_promo(document: dict) -> dict:
     return {
         "id": str(document["_id"]), "code": document["code"],
-        "percent_off": document["percent_off"], "active": document.get("active", True),
+        "percent_off": document.get("percent_off"),
+        "discount_type": document.get("discount_type", "percent"),
+        "discount_value": document.get("discount_value", document.get("percent_off")),
+        "active": document.get("active", True), "starts_at": document.get("starts_at"),
         "expires_at": document.get("expires_at"), "max_redemptions": document.get("max_redemptions"),
+        "max_per_customer": document.get("max_per_customer"),
+        "first_purchase_only": document.get("first_purchase_only", False),
+        "minimum_amount": int(document.get("minimum_amount") or 0),
+        "applicable_plan_keys": document.get("applicable_plan_keys") or [],
+        "applicable_order_types": document.get("applicable_order_types") or [],
         "redemptions": int(document.get("redemptions") or 0), "created_at": document.get("created_at"),
     }
 
 
 async def calculate(db, plan: str, promo_code: Optional[str]) -> dict:
-    subtotal = PLAN_PRICES[plan]
+    plan_document = await require_plan(db, plan, for_signup=True)
+    subtotal = int(plan_document.get("monthly_price") or 0)
     promo = None
     discount = 0
     if promo_code:
@@ -77,20 +91,35 @@ async def calculate(db, plan: str, promo_code: Optional[str]) -> dict:
             raise HTTPException(status_code=404, detail="Mã giảm giá không hợp lệ")
         expires = promo.get("expires_at")
         now = utcnow()
+        starts = promo.get("starts_at")
+        if starts and (starts.replace(tzinfo=timezone.utc) if starts.tzinfo is None else starts) > now:
+            raise HTTPException(status_code=400, detail="Mã giảm giá chưa có hiệu lực")
         if expires and (expires.replace(tzinfo=timezone.utc) if expires.tzinfo is None else expires) <= now:
             raise HTTPException(status_code=410, detail="Mã giảm giá đã hết hạn")
         if promo.get("max_redemptions") and int(promo.get("redemptions") or 0) >= promo["max_redemptions"]:
             raise HTTPException(status_code=409, detail="Mã giảm giá đã hết lượt sử dụng")
-        discount = round(subtotal * promo["percent_off"] / 100)
+        if promo.get("applicable_plan_keys") and plan not in promo["applicable_plan_keys"]:
+            raise HTTPException(status_code=400, detail="Mã giảm giá không áp dụng cho gói này")
+        if promo.get("applicable_order_types") and "signup" not in promo["applicable_order_types"]:
+            raise HTTPException(status_code=400, detail="Mã giảm giá không áp dụng cho đăng ký mới")
+        if subtotal < int(promo.get("minimum_amount") or 0):
+            raise HTTPException(status_code=400, detail="Đơn hàng chưa đạt giá trị tối thiểu")
+        discount_type = promo.get("discount_type", "percent")
+        discount_value = int(promo.get("discount_value") or promo.get("percent_off") or 0)
+        discount = discount_value if discount_type == "fixed" else round(subtotal * discount_value / 100)
     discounted = max(0, subtotal - discount)
-    vat = round(discounted * .1)
-    return {"subtotal": subtotal, "discount": discount, "vat": vat, "total": discounted + vat, "promo": promo}
+    vat = round(discounted * float(plan_document.get("vat_rate", 10)) / 100)
+    return {
+        "subtotal": subtotal, "discount": discount, "vat": vat,
+        "total": discounted + vat, "promo": promo, "plan": plan_document,
+    }
 
 
 @router.get("/quote")
-async def quote(plan: Literal["starter", "growth", "business"], promo_code: Optional[str] = None):
+async def quote(plan: str, promo_code: Optional[str] = None):
     result = await calculate(await get_mongodb(), plan, promo_code)
     result.pop("promo", None)
+    result.pop("plan", None)
     return result
 
 
@@ -103,6 +132,17 @@ async def complete_checkout(body: CheckoutRequest):
     email = str(body.email).lower()
     if await db.get_user_by_email(email):
         raise HTTPException(status_code=409, detail="Email này đã có tài khoản")
+    if pricing["promo"]:
+        promo = pricing["promo"]
+        customer_uses = await db.db.checkout_orders.count_documents({
+            "email": email, "promo_id": promo["_id"], "status": "completed",
+        })
+        if promo.get("max_per_customer") and customer_uses >= int(promo["max_per_customer"]):
+            raise HTTPException(status_code=409, detail="Bạn đã sử dụng hết lượt của mã giảm giá")
+        if promo.get("first_purchase_only") and await db.db.checkout_orders.count_documents({
+            "email": email, "status": "completed",
+        }):
+            raise HTTPException(status_code=409, detail="Mã chỉ áp dụng cho lần mua đầu tiên")
     if not settings.PAYMENT_CREDENTIAL_ENCRYPTION_KEY:
         raise HTTPException(status_code=503, detail="Mã hóa thông tin tài khoản chưa được cấu hình")
     if pricing["total"] > 0 and not all((
@@ -120,19 +160,45 @@ async def complete_checkout(body: CheckoutRequest):
         "email": email,
         "company_name": body.company_name.strip(),
         "plan": body.plan,
+        "plan_version": int(pricing["plan"].get("version") or 1),
+        "plan_snapshot": plan_snapshot(pricing["plan"]),
+        "price_snapshot": {
+            "subtotal": pricing["subtotal"], "discount": pricing["discount"],
+            "vat": pricing["vat"], "total": pricing["total"],
+            "vat_rate": pricing["plan"].get("vat_rate", 10),
+        },
         "payment_method": "bank_transfer",
         "promo_code": body.promo_code.strip().upper() if body.promo_code else None,
         "promo_id": pricing["promo"]["_id"] if pricing["promo"] else None,
+        "promo_reserved": bool(pricing["promo"]),
         "subtotal": pricing["subtotal"], "discount": pricing["discount"],
         "vat": pricing["vat"], "total": pricing["total"],
         "status": "pending",
         "expires_at": now + timedelta(minutes=settings.PAYMENT_ORDER_EXPIRE_MINUTES),
         "created_at": now, "updated_at": now,
     }
-    inserted = await db.db.checkout_orders.insert_one(order)
-    order["_id"] = inserted.inserted_id
-    if order["total"] == 0:
-        order = await provision_checkout_order(db, order)
+    if pricing["promo"]:
+        promo_query: dict = {"_id": pricing["promo"]["_id"], "active": True}
+        if pricing["promo"].get("max_redemptions"):
+            promo_query["$expr"] = {"$lt": [
+                {"$add": [{"$ifNull": ["$redemptions", 0]}, {"$ifNull": ["$reservations", 0]}]},
+                int(pricing["promo"]["max_redemptions"]),
+            ]}
+        reserved = await db.db.promo_codes.update_one(promo_query, {"$inc": {"reservations": 1}})
+        if not reserved.modified_count:
+            raise HTTPException(status_code=409, detail="Mã giảm giá đã hết lượt sử dụng")
+    try:
+        inserted = await db.db.checkout_orders.insert_one(order)
+        order["_id"] = inserted.inserted_id
+        if order["total"] == 0:
+            order = await provision_checkout_order(db, order)
+    except Exception:
+        if pricing["promo"]:
+            await db.db.promo_codes.update_one(
+                {"_id": pricing["promo"]["_id"], "reservations": {"$gt": 0}},
+                {"$inc": {"reservations": -1}},
+            )
+        raise
     checkout = build_sepay_checkout(order) if order["total"] > 0 else None
     response = public_order(order, include_credentials=True, checkout=checkout)
     response["access_token"] = access_token
@@ -242,6 +308,7 @@ async def sepay_ipn(request: Request):
         {"_id": order["_id"], "status": "pending"},
         {"$set": {
             "status": "processing", "sepay_transaction_id": transaction_id,
+            "sepay_order_id": sepay_order.get("order_id"),
             "paid_at": utcnow(), "updated_at": utcnow(),
         }},
         return_document=ReturnDocument.AFTER,
@@ -275,8 +342,16 @@ async def list_promos(_admin: dict = Depends(require_account_admin)):
 async def create_promo(body: PromoCreate, admin: dict = Depends(require_account_admin)):
     db = await get_mongodb()
     now = utcnow()
+    payload = body.model_dump()
+    if payload["discount_type"] == "percent":
+        payload["discount_value"] = payload["discount_value"] or payload["percent_off"]
+        if not payload["discount_value"] or payload["discount_value"] > 100:
+            raise HTTPException(status_code=422, detail="Phần trăm giảm phải từ 1 đến 100")
+        payload["percent_off"] = payload["discount_value"]
+    elif not payload["discount_value"]:
+        raise HTTPException(status_code=422, detail="Số tiền giảm là bắt buộc")
     document = {
-        **body.model_dump(), "redemptions": 0, "created_by": str(admin["_id"]),
+        **payload, "redemptions": 0, "reservations": 0, "created_by": str(admin["_id"]),
         "created_at": now, "updated_at": now,
     }
     try:
@@ -284,6 +359,11 @@ async def create_promo(body: PromoCreate, admin: dict = Depends(require_account_
     except Exception as exc:
         raise HTTPException(status_code=409, detail="Mã promo đã tồn tại") from exc
     document["_id"] = result.inserted_id
+    await db.db.platform_audit_logs.insert_one({
+        "actor_id": str(admin["_id"]), "action": "promo_created",
+        "resource_type": "promo", "resource_id": str(result.inserted_id),
+        "after": public_promo(document), "created_at": now,
+    })
     return public_promo(document)
 
 
@@ -295,4 +375,9 @@ async def toggle_promo(promo_id: str, active: bool, _admin: dict = Depends(requi
     )
     if not result.matched_count:
         raise HTTPException(status_code=404, detail="Không tìm thấy promo")
+    await db.db.platform_audit_logs.insert_one({
+        "actor_id": str(_admin["_id"]), "action": "promo_status_changed",
+        "resource_type": "promo", "resource_id": promo_id,
+        "after": {"active": active}, "created_at": utcnow(),
+    })
     return {"updated": True}

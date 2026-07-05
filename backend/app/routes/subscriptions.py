@@ -18,6 +18,7 @@ from app.services.payments import (
     public_order,
     utcnow,
 )
+from app.services.plans import get_plan, plan_snapshot, require_plan, serialize_plan
 from app.services.subscriptions import (
     PLAN_CATALOG,
     get_subscription,
@@ -58,7 +59,7 @@ class UpgradeDecision(BaseModel):
 
 
 class SubscriptionChange(BaseModel):
-    requested_plan: Literal["starter", "growth", "business"]
+    requested_plan: str = Field(min_length=2, max_length=40)
 
 
 def serialize_document(document: dict) -> dict:
@@ -70,7 +71,9 @@ def serialize_document(document: dict) -> dict:
 
 @router.get("/plans")
 async def list_plans():
-    return [{"key": key, **value} for key, value in PLAN_CATALOG.items() if key != "legacy"]
+    db = await get_mongodb()
+    rows = await db.db.plans.find({"is_active": True}).sort("display_order", 1).to_list(100)
+    return [serialize_plan(row) for row in rows]
 
 
 @router.get("/me")
@@ -79,9 +82,38 @@ async def my_subscription(user: dict = Depends(require_auth)):
     return await subscription_summary(db, await resolve_owner_id(db, user))
 
 
+@router.get("/available-changes")
+async def available_plan_changes(user: dict = Depends(require_auth)):
+    if user.get("role") != "user":
+        return []
+    db = await get_mongodb()
+    subscription = await get_subscription(db, str(user["_id"]))
+    current = await get_plan(db, subscription.get("plan", ""), active_only=False)
+    rows = await db.db.plans.find({"is_active": True}).sort("display_order", 1).to_list(100)
+    result = []
+    for plan in rows:
+        if plan["key"] == subscription.get("plan"):
+            continue
+        if plan.get("requires_contact"):
+            item = serialize_plan(plan)
+            item["change_type"] = "contact"
+            result.append(item)
+            continue
+        try:
+            quote = subscription_change_quote(subscription, plan["key"], current, plan)
+        except HTTPException:
+            continue
+        allowed = plan.get("allow_upgrade", True) if quote["direction"] == "upgrade" else plan.get("allow_downgrade", True)
+        if allowed:
+            item = serialize_plan(plan)
+            item["change_type"] = quote["direction"]
+            result.append(item)
+    return result
+
+
 @router.get("/change/quote")
 async def change_quote(
-    requested_plan: Literal["starter", "growth", "business"],
+    requested_plan: str,
     user: dict = Depends(require_auth),
 ):
     if user.get("role") != "user":
@@ -90,7 +122,9 @@ async def change_quote(
     subscription = await get_subscription(db, str(user["_id"]))
     if subscription.get("next_plan_paid"):
         raise HTTPException(status_code=409, detail="Bạn đã thanh toán cho một thay đổi gói ở kỳ tiếp theo")
-    return subscription_change_quote(subscription, requested_plan)
+    requested = await require_plan(db, requested_plan)
+    current = await get_plan(db, subscription.get("plan", ""), active_only=False)
+    return subscription_change_quote(subscription, requested_plan, current, requested)
 
 
 @router.post("/change", status_code=201)
@@ -106,7 +140,15 @@ async def change_subscription(
     subscription = await get_subscription(db, owner_id)
     if subscription.get("next_plan_paid"):
         raise HTTPException(status_code=409, detail="Bạn đã thanh toán cho một thay đổi gói ở kỳ tiếp theo")
-    quote = subscription_change_quote(subscription, body.requested_plan)
+    requested = await require_plan(db, body.requested_plan)
+    if requested.get("requires_contact"):
+        raise HTTPException(status_code=400, detail="Gói này cần liên hệ tư vấn")
+    current = await get_plan(db, subscription.get("plan", ""), active_only=False)
+    quote = subscription_change_quote(subscription, body.requested_plan, current, requested)
+    if quote["direction"] == "upgrade" and not requested.get("allow_upgrade", True):
+        raise HTTPException(status_code=400, detail="Gói này hiện không cho phép nâng cấp")
+    if quote["direction"] == "downgrade" and not requested.get("allow_downgrade", True):
+        raise HTTPException(status_code=400, detail="Gói này hiện không cho phép hạ cấp")
     now = utcnow()
 
     if not all((
@@ -134,6 +176,12 @@ async def change_subscription(
         "company_name": user.get("name") or user.get("email"),
         "from_plan": quote["current_plan"],
         "plan": body.requested_plan,
+        "plan_version": int(requested.get("version") or 1),
+        "plan_snapshot": plan_snapshot(requested),
+        "price_snapshot": {
+            "subtotal": quote["subtotal"], "discount": 0, "vat": quote["vat"],
+            "total": quote["total"], "vat_rate": quote["vat_rate"],
+        },
         "change_direction": quote["direction"],
         "payment_method": "bank_transfer",
         "subtotal": quote["subtotal"],
@@ -146,6 +194,59 @@ async def change_subscription(
         "expires_at": now + timedelta(minutes=settings.PAYMENT_ORDER_EXPIRE_MINUTES),
         "created_at": now,
         "updated_at": now,
+    }
+    inserted = await db.db.checkout_orders.insert_one(order)
+    order["_id"] = inserted.inserted_id
+    response = public_order(order, checkout=build_sepay_checkout(order))
+    response["access_token"] = access_token
+    return response
+
+
+@router.post("/renew", status_code=201)
+async def renew_subscription(user: dict = Depends(require_auth)):
+    if user.get("role") != "user":
+        raise HTTPException(status_code=403, detail="Chỉ chủ website có thể gia hạn")
+    db = await get_mongodb()
+    owner_id = str(user["_id"])
+    subscription = await get_subscription(db, owner_id)
+    plan = await require_plan(db, subscription.get("plan", ""))
+    if plan.get("requires_contact") or plan.get("monthly_price") is None:
+        raise HTTPException(status_code=400, detail="Gói này cần liên hệ để gia hạn")
+    if not all((
+        settings.SEPAY_ENABLED, settings.SEPAY_MERCHANT_ID,
+        settings.SEPAY_MERCHANT_SECRET_KEY, settings.SEPAY_IPN_SECRET_KEY,
+        settings.SEPAY_CHECKOUT_URL,
+    )):
+        raise HTTPException(status_code=503, detail="Thanh toán SePay chưa được cấu hình đầy đủ")
+    now = utcnow()
+    existing = await db.db.checkout_orders.find_one({
+        "owner_id": owner_id, "order_type": "renewal",
+        "status": {"$in": ["pending", "processing"]}, "expires_at": {"$gt": now},
+    })
+    if existing:
+        raise HTTPException(status_code=409, detail="Bạn đang có đơn gia hạn chưa hoàn tất")
+    subtotal = int(plan.get("monthly_price") or 0)
+    vat = round(subtotal * float(plan.get("vat_rate", 10)) / 100)
+    if subtotal <= 0:
+        raise HTTPException(status_code=400, detail="Gói miễn phí không cần gia hạn thanh toán")
+    access_token = generate_access_token()
+    snapshot = plan_snapshot(plan)
+    period_end = subscription.get("current_period_end") or subscription.get("expires_at")
+    if period_end and period_end.tzinfo is None:
+        period_end = period_end.replace(tzinfo=timezone.utc)
+    renewal_start = max(now, period_end) if period_end else now
+    order = {
+        "order_id": generate_order_id(), "order_type": "renewal",
+        "access_token_hash": hash_token(access_token), "owner_id": owner_id,
+        "email": str(user.get("email") or "").lower(),
+        "company_name": user.get("name") or user.get("email"),
+        "plan": plan["key"], "plan_version": snapshot["version"], "plan_snapshot": snapshot,
+        "price_snapshot": {"subtotal": subtotal, "discount": 0, "vat": vat, "total": subtotal + vat, "vat_rate": plan.get("vat_rate", 10)},
+        "payment_method": "bank_transfer", "subtotal": subtotal, "discount": 0,
+        "vat": vat, "total": subtotal + vat, "status": "pending",
+        "renewal_period_start": renewal_start,
+        "expires_at": now + timedelta(minutes=settings.PAYMENT_ORDER_EXPIRE_MINUTES),
+        "created_at": now, "updated_at": now,
     }
     inserted = await db.db.checkout_orders.insert_one(order)
     order["_id"] = inserted.inserted_id

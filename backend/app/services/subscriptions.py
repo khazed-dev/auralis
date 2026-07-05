@@ -61,22 +61,44 @@ def billing_period(subscription: dict, now: Optional[datetime] = None) -> tuple[
     return start, end
 
 
-def subscription_change_quote(subscription: dict, requested_plan: str) -> dict:
+def subscription_change_quote(
+    subscription: dict,
+    requested_plan: str,
+    current_plan_document: Optional[dict] = None,
+    requested_plan_document: Optional[dict] = None,
+) -> dict:
     current_plan = subscription.get("plan", "legacy")
-    if requested_plan not in PLAN_MONTHLY_PRICES:
+    requested_price_value = (
+        requested_plan_document.get("monthly_price")
+        if requested_plan_document is not None
+        else PLAN_MONTHLY_PRICES.get(requested_plan)
+    )
+    if requested_price_value is None:
         raise HTTPException(status_code=400, detail="Gói này cần liên hệ tư vấn")
-    if requested_plan == "starter" and current_plan != "legacy":
+    if requested_plan_document and not requested_plan_document.get("is_active", True):
+        raise HTTPException(status_code=400, detail="Gói này đã ngừng hoạt động")
+    if (
+        requested_plan_document
+        and requested_plan_document.get("trial_days", 0) > 0
+        and current_plan != "legacy"
+    ):
         raise HTTPException(status_code=400, detail="Gói Khởi đầu chỉ áp dụng cho tài khoản mới")
     if requested_plan == current_plan:
         raise HTTPException(status_code=400, detail="Bạn đang sử dụng gói này")
 
-    current_price = PLAN_MONTHLY_PRICES.get(current_plan, 0)
-    requested_price = PLAN_MONTHLY_PRICES[requested_plan]
+    current_snapshot = subscription.get("plan_snapshot") or {}
+    current_price = int(
+        current_snapshot.get("monthly_price")
+        if current_snapshot.get("monthly_price") is not None
+        else (current_plan_document or {}).get("monthly_price")
+        or PLAN_MONTHLY_PRICES.get(current_plan, 0)
+    )
+    requested_price = int(requested_price_value)
     now = datetime.now(timezone.utc)
     period_start, period_end = billing_period(subscription, now)
     direction = "upgrade" if requested_price > current_price else "downgrade"
     if direction == "upgrade":
-        if current_plan in {"starter", "legacy"}:
+        if current_plan == "legacy" or int(current_snapshot.get("trial_days") or 0) > 0 or current_plan == "starter":
             period_start = now
             period_end = now + timedelta(days=PAID_PERIOD_DAYS)
             ratio = 1.0
@@ -91,7 +113,8 @@ def subscription_change_quote(subscription: dict, requested_plan: str) -> dict:
         # SePay is one-time payment: prepay the next period now, activate it
         # only after the already-paid current period ends.
         subtotal = requested_price
-    vat = round(subtotal * .1)
+    vat_rate = float((requested_plan_document or {}).get("vat_rate", 10))
+    vat = round(subtotal * vat_rate / 100)
     return {
         "current_plan": current_plan,
         "requested_plan": requested_plan,
@@ -101,6 +124,7 @@ def subscription_change_quote(subscription: dict, requested_plan: str) -> dict:
         "remaining_ratio": ratio,
         "subtotal": subtotal,
         "vat": vat,
+        "vat_rate": vat_rate,
         "total": subtotal + vat,
         "current_period_start": period_start,
         "current_period_end": period_end,
@@ -109,6 +133,11 @@ def subscription_change_quote(subscription: dict, requested_plan: str) -> dict:
 
 def current_period() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m")
+
+
+def usage_period(subscription: Optional[dict] = None) -> str:
+    start = as_utc((subscription or {}).get("current_period_start"))
+    return f"billing:{start.strftime('%Y-%m-%dT%H:%M:%SZ')}" if start else current_period()
 
 
 def _id(user: dict) -> str:
@@ -197,11 +226,15 @@ async def get_subscription(db, owner_id: str) -> dict:
         next_end = period_end + timedelta(days=PAID_PERIOD_DAYS)
         rollover = {
             "plan": document["next_plan"],
+            "plan_version": document.get("next_plan_version"),
+            "plan_snapshot": document.get("next_plan_snapshot"),
             "status": "active",
             "current_period_start": period_end,
             "current_period_end": next_end,
             "expires_at": next_end,
             "next_plan": None,
+            "next_plan_version": None,
+            "next_plan_snapshot": None,
             "next_plan_paid": False,
             "cancel_at_period_end": False,
             "updated_at": datetime.now(timezone.utc),
@@ -214,14 +247,18 @@ async def get_subscription(db, owner_id: str) -> dict:
 
 
 def effective_limits(subscription: dict) -> dict[str, Optional[int]]:
-    plan = PLAN_CATALOG.get(subscription.get("plan"), PLAN_CATALOG["legacy"])
-    limits = dict(plan["limits"])
+    snapshot = subscription.get("plan_snapshot") or {}
+    if snapshot.get("limits") is not None:
+        limits = dict(snapshot["limits"])
+    else:
+        plan = PLAN_CATALOG.get(subscription.get("plan"), PLAN_CATALOG["legacy"])
+        limits = dict(plan["limits"])
     limits.update(subscription.get("custom_limits") or {})
     return limits
 
 
-async def get_usage(db, owner_id: str) -> dict[str, int]:
-    period = current_period()
+async def get_usage(db, owner_id: str, subscription: Optional[dict] = None) -> dict[str, int]:
+    period = usage_period(subscription)
     counters = await db.db.subscription_usage.find_one(
         {"owner_id": owner_id, "period": period}
     ) or {}
@@ -236,7 +273,7 @@ async def get_usage(db, owner_id: str) -> dict[str, int]:
 async def subscription_summary(db, owner_id: str) -> dict:
     subscription = await get_subscription(db, owner_id)
     plan_key = subscription.get("plan", "legacy")
-    usage = await get_usage(db, owner_id)
+    usage = await get_usage(db, owner_id, subscription)
     limits = effective_limits(subscription)
     resources = {}
     for key, used in usage.items():
@@ -249,8 +286,12 @@ async def subscription_summary(db, owner_id: str) -> dict:
         }
     return {
         "subscription": subscription,
-        "plan": {"key": plan_key, **PLAN_CATALOG.get(plan_key, PLAN_CATALOG["legacy"])},
-        "period": current_period(),
+        "plan": (
+            {"key": plan_key, **subscription["plan_snapshot"]}
+            if subscription.get("plan_snapshot")
+            else {"key": plan_key, **PLAN_CATALOG.get(plan_key, PLAN_CATALOG["legacy"])}
+        ),
+        "period": usage_period(subscription),
         "resources": resources,
     }
 
@@ -278,7 +319,7 @@ async def enforce_quota(db, owner_id: str, resource: str, amount: int = 1) -> No
     limit = effective_limits(subscription).get(resource)
     if limit is None:
         return
-    used = (await get_usage(db, owner_id)).get(resource, 0)
+    used = (await get_usage(db, owner_id, subscription)).get(resource, 0)
     if used + amount > limit:
         raise HTTPException(
             status_code=429,
@@ -296,8 +337,10 @@ async def increment_usage(db, owner_id: str, resource: str, amount: int = 1) -> 
     if amount <= 0 or getattr(db, "db", None) is None:
         return
     now = datetime.now(timezone.utc)
+    subscription = await get_subscription(db, owner_id)
+    period = usage_period(subscription)
     await db.db.subscription_usage.update_one(
-        {"owner_id": owner_id, "period": current_period()},
+        {"owner_id": owner_id, "period": period},
         {
             "$inc": {resource: amount},
             "$set": {"updated_at": now},

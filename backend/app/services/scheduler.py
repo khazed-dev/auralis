@@ -57,6 +57,13 @@ class SchedulerService:
             
             if self._db:
                 await self._load_all_schedules()
+                self.scheduler.add_job(
+                    self._run_subscription_lifecycle,
+                    trigger=IntervalTrigger(minutes=5),
+                    id="subscription_lifecycle",
+                    name="Subscription and payment lifecycle",
+                    replace_existing=True,
+                )
         except Exception as e:
             logger.error(f"Failed to start scheduler: {e}")
             raise
@@ -84,6 +91,12 @@ class SchedulerService:
             logger.info(f"Loaded {loaded_count} crawl schedules")
         except Exception as e:
             logger.error(f"Failed to load schedules: {e}")
+
+    async def _run_subscription_lifecycle(self):
+        if not self._db:
+            return
+        from app.services.subscription_lifecycle import run_subscription_lifecycle
+        await run_subscription_lifecycle(self._db)
     
     async def add_crawl_schedule(
         self,

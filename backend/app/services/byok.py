@@ -44,7 +44,8 @@ def decrypt_secret(value: str) -> str:
 
 async def require_custom_plan(db, owner_id: str) -> dict:
     subscription = await get_subscription(db, owner_id)
-    if subscription.get("plan") != "custom" or subscription.get("status") not in {"active", "trialing"}:
+    features = (subscription.get("plan_snapshot") or {}).get("features") or {}
+    if not features.get("byok", subscription.get("plan") == "custom") or subscription.get("status") not in {"active", "trialing"}:
         raise HTTPException(status_code=403, detail={
             "code": "custom_plan_required", "message": "BYOK requires an active Custom plan",
         })

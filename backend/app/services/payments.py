@@ -88,6 +88,8 @@ async def provision_checkout_order(db, order: dict) -> dict:
     """Create the customer account and selected subscription exactly once."""
     if order.get("order_type") == "subscription_change":
         return await apply_subscription_change(db, order)
+    if order.get("order_type") == "renewal":
+        return await apply_subscription_renewal(db, order)
     if order.get("owner_id"):
         return order
 
@@ -110,16 +112,20 @@ async def provision_checkout_order(db, order: dict) -> dict:
 
     owner_id = str(persisted["_id"])
     now = utcnow()
-    starter = order["plan"] == "starter"
-    trial_ends_at = now + timedelta(days=7) if starter else None
-    period_end = trial_ends_at if starter else now + timedelta(days=30)
+    snapshot = order.get("plan_snapshot") or {}
+    trial_days = int(snapshot.get("trial_days") or 0)
+    is_trial = trial_days > 0 and int(order.get("total") or 0) == 0
+    trial_ends_at = now + timedelta(days=trial_days) if is_trial else None
+    period_end = trial_ends_at if is_trial else now + timedelta(days=30)
     try:
         await db.db.subscriptions.update_one(
             {"owner_id": owner_id},
             {"$set": {
                 "owner_id": owner_id,
                 "plan": order["plan"],
-                "status": "trialing" if starter else "active",
+                "status": "trialing" if is_trial else "active",
+                "plan_version": int(order.get("plan_version") or snapshot.get("version") or 1),
+                "plan_snapshot": snapshot,
                 "custom_limits": {},
                 "started_at": now,
                 "expires_at": period_end,
@@ -144,7 +150,10 @@ async def provision_checkout_order(db, order: dict) -> dict:
         await db.db.checkout_orders.update_one({"_id": order["_id"]}, {"$set": updates})
         promo_id = order.get("promo_id")
         if promo_id:
-            await db.db.promo_codes.update_one({"_id": promo_id}, {"$inc": {"redemptions": 1}})
+            increments = {"redemptions": 1}
+            if order.get("promo_reserved"):
+                increments["reservations"] = -1
+            await db.db.promo_codes.update_one({"_id": promo_id}, {"$inc": increments})
         return {**order, **updates}
     except Exception:
         await db.db.users.delete_one({"_id": persisted["_id"]})
@@ -164,6 +173,8 @@ async def apply_subscription_change(db, order: dict) -> dict:
     if downgrade:
         updates = {
             "next_plan": order["plan"],
+            "next_plan_version": order.get("plan_version"),
+            "next_plan_snapshot": order.get("plan_snapshot"),
             "next_plan_paid": True,
             "cancel_at_period_end": True,
             "billing_cycle": "monthly",
@@ -172,6 +183,8 @@ async def apply_subscription_change(db, order: dict) -> dict:
     else:
         updates = {
             "plan": order["plan"],
+            "plan_version": order.get("plan_version"),
+            "plan_snapshot": order.get("plan_snapshot"),
             "status": "active",
             "next_plan": None,
             "next_plan_paid": False,
@@ -206,6 +219,35 @@ async def apply_subscription_change(db, order: dict) -> dict:
     }
     await db.db.checkout_orders.update_one({"_id": order["_id"]}, {"$set": order_updates})
     return {**order, **order_updates}
+
+
+async def apply_subscription_renewal(db, order: dict) -> dict:
+    """Extend an existing subscription after a full-price renewal payment."""
+    if order.get("applied_at"):
+        return order
+    now = utcnow()
+    period_start = order.get("renewal_period_start") or now
+    if period_start.tzinfo is None:
+        period_start = period_start.replace(tzinfo=timezone.utc)
+    period_end = period_start + timedelta(days=30)
+    await db.db.subscriptions.update_one(
+        {"owner_id": order["owner_id"]},
+        {"$set": {
+            "plan": order["plan"], "plan_version": order.get("plan_version"),
+            "plan_snapshot": order.get("plan_snapshot"), "status": "active",
+            "current_period_start": period_start, "current_period_end": period_end,
+            "expires_at": period_end, "billing_cycle": "monthly", "updated_at": now,
+        }},
+        upsert=True,
+    )
+    await db.db.subscription_audit_logs.insert_one({
+        "owner_id": order["owner_id"], "action": "self_service_renewal_paid",
+        "plan": order["plan"], "order_id": order["order_id"],
+        "total": order["total"], "created_at": now,
+    })
+    updates = {"status": "completed", "completed_at": now, "applied_at": now, "updated_at": now}
+    await db.db.checkout_orders.update_one({"_id": order["_id"]}, {"$set": updates})
+    return {**order, **updates}
 
 
 def public_order(
