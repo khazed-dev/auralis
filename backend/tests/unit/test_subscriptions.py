@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -9,6 +9,7 @@ from app.services.subscriptions import (
     effective_limits,
     enforce_quota,
     get_subscription,
+    subscription_change_quote,
     subscription_summary,
 )
 
@@ -27,6 +28,45 @@ def test_custom_limits_override_catalog():
     limits = effective_limits({"plan": "growth", "custom_limits": {"sites": 12}})
     assert limits["sites"] == 12
     assert limits["messages"] == PLAN_CATALOG["growth"]["limits"]["messages"]
+
+
+def test_paid_upgrade_charges_prorated_difference_and_vat():
+    now = datetime.now(timezone.utc)
+    quote = subscription_change_quote({
+        "plan": "growth",
+        "current_period_start": now - timedelta(days=15),
+        "current_period_end": now + timedelta(days=15),
+    }, "business")
+
+    assert quote["direction"] == "upgrade"
+    assert 3_699_000 <= quote["subtotal"] <= 3_700_000
+    assert quote["vat"] == round(quote["subtotal"] * .1)
+    assert quote["total"] == quote["subtotal"] + quote["vat"]
+
+
+def test_downgrade_prepays_full_next_period_without_refund():
+    now = datetime.now(timezone.utc)
+    quote = subscription_change_quote({
+        "plan": "business",
+        "current_period_start": now,
+        "current_period_end": now + timedelta(days=30),
+    }, "growth")
+
+    assert quote["direction"] == "downgrade"
+    assert quote["subtotal"] == 2_400_000
+    assert quote["total"] == 2_640_000
+
+
+def test_starter_upgrade_starts_new_full_paid_period():
+    quote = subscription_change_quote({
+        "plan": "starter",
+        "started_at": datetime.now(timezone.utc) - timedelta(days=2),
+        "expires_at": datetime.now(timezone.utc) + timedelta(days=5),
+    }, "growth")
+
+    assert quote["remaining_ratio"] == 1
+    assert quote["subtotal"] == 2_400_000
+    assert quote["total"] == 2_640_000
 
 
 @pytest.mark.asyncio

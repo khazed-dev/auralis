@@ -36,6 +36,76 @@ PLAN_CATALOG: dict[str, dict[str, Any]] = {
     },
 }
 
+PLAN_MONTHLY_PRICES = {
+    "starter": 0,
+    "growth": 2_400_000,
+    "business": 9_800_000,
+}
+PAID_PERIOD_DAYS = 30
+
+
+def as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    if value and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def billing_period(subscription: dict, now: Optional[datetime] = None) -> tuple[datetime, datetime]:
+    """Return a usable current billing period, including for pre-billing records."""
+    now = now or datetime.now(timezone.utc)
+    start = as_utc(subscription.get("current_period_start") or subscription.get("started_at"))
+    end = as_utc(subscription.get("current_period_end") or subscription.get("expires_at"))
+    if not start or not end or end <= start or end <= now:
+        start = now
+        end = now + timedelta(days=PAID_PERIOD_DAYS)
+    return start, end
+
+
+def subscription_change_quote(subscription: dict, requested_plan: str) -> dict:
+    current_plan = subscription.get("plan", "legacy")
+    if requested_plan not in PLAN_MONTHLY_PRICES:
+        raise HTTPException(status_code=400, detail="Gói này cần liên hệ tư vấn")
+    if requested_plan == "starter" and current_plan != "legacy":
+        raise HTTPException(status_code=400, detail="Gói Khởi đầu chỉ áp dụng cho tài khoản mới")
+    if requested_plan == current_plan:
+        raise HTTPException(status_code=400, detail="Bạn đang sử dụng gói này")
+
+    current_price = PLAN_MONTHLY_PRICES.get(current_plan, 0)
+    requested_price = PLAN_MONTHLY_PRICES[requested_plan]
+    now = datetime.now(timezone.utc)
+    period_start, period_end = billing_period(subscription, now)
+    direction = "upgrade" if requested_price > current_price else "downgrade"
+    if direction == "upgrade":
+        if current_plan in {"starter", "legacy"}:
+            period_start = now
+            period_end = now + timedelta(days=PAID_PERIOD_DAYS)
+            ratio = 1.0
+            subtotal = requested_price
+        else:
+            total_seconds = max(1, (period_end - period_start).total_seconds())
+            remaining_seconds = max(0, (period_end - now).total_seconds())
+            ratio = min(1.0, remaining_seconds / total_seconds)
+            subtotal = round((requested_price - current_price) * ratio)
+    else:
+        ratio = 0
+        # SePay is one-time payment: prepay the next period now, activate it
+        # only after the already-paid current period ends.
+        subtotal = requested_price
+    vat = round(subtotal * .1)
+    return {
+        "current_plan": current_plan,
+        "requested_plan": requested_plan,
+        "direction": direction,
+        "current_price": current_price,
+        "requested_price": requested_price,
+        "remaining_ratio": ratio,
+        "subtotal": subtotal,
+        "vat": vat,
+        "total": subtotal + vat,
+        "current_period_start": period_start,
+        "current_period_end": period_end,
+    }
+
 
 def current_period() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m")
@@ -117,6 +187,27 @@ async def get_subscription(db, owner_id: str) -> dict:
             "expires_at": None,
             "custom_limits": {},
         }
+    period_end = as_utc(document.get("current_period_end") or document.get("expires_at"))
+    if (
+        document.get("next_plan")
+        and document.get("next_plan_paid")
+        and period_end
+        and period_end <= datetime.now(timezone.utc)
+    ):
+        next_end = period_end + timedelta(days=PAID_PERIOD_DAYS)
+        rollover = {
+            "plan": document["next_plan"],
+            "status": "active",
+            "current_period_start": period_end,
+            "current_period_end": next_end,
+            "expires_at": next_end,
+            "next_plan": None,
+            "next_plan_paid": False,
+            "cancel_at_period_end": False,
+            "updated_at": datetime.now(timezone.utc),
+        }
+        await db.db.subscriptions.update_one({"owner_id": owner_id}, {"$set": rollover})
+        document.update(rollover)
     if "_id" in document:
         document["_id"] = str(document["_id"])
     return document

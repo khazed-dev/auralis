@@ -16,6 +16,7 @@ type Quote = { subtotal: number; discount: number; vat: number; total: number };
 type SePayCheckout = { url: string; fields: Record<string, string> };
 type Order = {
   order_id: string; access_token?: string; status: "pending" | "processing" | "completed" | "expired";
+  order_type?: "signup" | "subscription_change";
   plan: PlanKey; trial_ends_at?: string; expires_at?: string; email: string;
   password?: string; payment_method: string; total: number; checkout?: SePayCheckout;
 };
@@ -52,8 +53,10 @@ export function CheckoutPage() {
     }
     fetch(`${API_BASE}/checkout/orders/${callbackOrder}?access_token=${encodeURIComponent(accessToken)}`, { cache: "no-store" })
       .then(async response => {
-        const body = await response.json();
-        if (!response.ok) throw new Error(body.detail || "Không thể kiểm tra giao dịch.");
+        const contentType = response.headers.get("content-type") || "";
+        const body = contentType.includes("application/json") ? await response.json() : null;
+        if (!response.ok) throw new Error(body?.detail || "Không thể kiểm tra giao dịch.");
+        if (!body) throw new Error("Phản hồi trạng thái thanh toán không hợp lệ.");
         setOrder({ ...body, access_token: accessToken });
       })
       .catch((reason: Error) => setError(reason.message));
@@ -160,9 +163,10 @@ function PaymentWaiting({ order }: { order: Order }) {
 }
 
 function CheckoutSuccess({ result, planName }: { result: Order; planName: string }) {
+  const isUpgrade = result.order_type === "subscription_change";
   return <div className="checkout-success-page"><div className="success-glow one" /><div className="success-glow two" /><main className="success-card">
-    <div className="success-check">✓</div><h1>Đăng ký thành công!</h1><p>Chào mừng bạn đến với gói <strong>{planName}</strong> của Auralis. {result.trial_ends_at ? `Tài khoản dùng thử đã sẵn sàng đến ${new Date(result.trial_ends_at).toLocaleDateString("vi-VN")}.` : "Tài khoản của bạn đã sẵn sàng để sử dụng."}</p>
+    <div className="success-check">✓</div><h1>{isUpgrade ? "Nâng cấp thành công!" : "Đăng ký thành công!"}</h1><p>{isUpgrade ? <>Gói dịch vụ của bạn đã được nâng cấp lên <strong>{planName}</strong>.</> : <>Chào mừng bạn đến với gói <strong>{planName}</strong> của Auralis. {result.trial_ends_at ? `Tài khoản dùng thử đã sẵn sàng đến ${new Date(result.trial_ends_at).toLocaleDateString("vi-VN")}.` : "Tài khoản của bạn đã sẵn sàng để sử dụng."}</>}</p>
     <section><small>CHI TIẾT ĐƠN HÀNG</small><span>Mã đơn hàng <b>#{result.order_id}</b></span><span>Phương thức <b>VietQR</b></span><span>Tài khoản <b>{result.email}</b></span>{result.password && <span>Mật khẩu <b>{result.password}</b></span>}<span className="success-total">Tổng thanh toán <b>{money(result.total)}</b></span></section>
-    <div className="success-actions"><Link href="/login">Đi đến Dashboard　→</Link><button type="button" onClick={() => window.print()}>▧　Xem hóa đơn</button></div><small>Bạn có thắc mắc? <a href="mailto:support@auralis.ai">Liên hệ bộ phận hỗ trợ</a></small>
+    <div className="success-actions"><Link href={isUpgrade ? "/dashboard/subscription" : "/login"}>Đi đến Dashboard　→</Link><button type="button" onClick={() => window.print()}>▧　Xem hóa đơn</button></div><small>Bạn có thắc mắc? <a href="mailto:support@auralis.ai">Liên hệ bộ phận hỗ trợ</a></small>
   </main></div>;
 }

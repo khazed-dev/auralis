@@ -20,6 +20,15 @@ type ModelUsage = {
   id: string; period: string; provider: string; model: string;
   calls: number; input_tokens: number; output_tokens: number; total_tokens: number;
 };
+type ChangeQuote = {
+  current_plan: string; requested_plan: string; direction: "upgrade" | "downgrade";
+  current_price: number; requested_price: number; remaining_ratio: number;
+  subtotal: number; vat: number; total: number; current_period_end: string;
+};
+type CheckoutOrder = {
+  order_id: string; access_token: string; status: string; effective_at?: string;
+  checkout?: { url: string; fields: Record<string, string> };
+};
 
 const labels: Record<string, string> = {
   sites: "Website", members: "Thành viên", messages: "Tin nhắn AI", crawl_pages: "Trang crawl",
@@ -38,7 +47,7 @@ const planPresentation: Record<string, {
   },
   business: {
     title: "Doanh nghiệp", price: "9,8 triệu", suffix: "VNĐ/tháng",
-    action: "Liên hệ tư vấn",
+    action: "Chọn gói Doanh nghiệp",
     features: ["20 website", "100.000 hội thoại AI mỗi tháng", "Lập chỉ mục 20.000 trang", "20 thành viên và hỗ trợ ưu tiên"],
   },
   custom: {
@@ -52,6 +61,8 @@ export function SubscriptionModule() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [requests, setRequests] = useState<Request[]>([]);
   const [requestOpen, setRequestOpen] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState("");
+  const [changeQuote, setChangeQuote] = useState<ChangeQuote | null>(null);
   const [byok, setByok] = useState<ByokConfig | null>(null);
   const [modelUsage, setModelUsage] = useState<ModelUsage[]>([]);
   const [error, setError] = useState("");
@@ -85,9 +96,45 @@ export function SubscriptionModule() {
   async function submitRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const requestedPlan = String(form.get("requested_plan") || "");
+    if (requestedPlan !== "custom") {
+      const response = await authFetch(`${API_BASE}/subscriptions/change`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requested_plan: requestedPlan }),
+      });
+      const body = (await response.json().catch(() => ({}))) as CheckoutOrder & { detail?: string };
+      if (!response.ok) {
+        setError(typeof body.detail === "string" ? body.detail : "Không thể thay đổi gói.");
+        return;
+      }
+      if (body.status === "scheduled") {
+        setMessage(`Đã lên lịch đổi gói vào ${body.effective_at ? new Date(body.effective_at).toLocaleDateString("vi-VN") : "cuối kỳ"}.`);
+        setRequestOpen(false);
+        await load();
+        return;
+      }
+      if (body.access_token) {
+        window.sessionStorage.setItem(`auralis-payment:${body.order_id}`, body.access_token);
+      }
+      if (body.checkout) {
+        const gatewayForm = document.createElement("form");
+        gatewayForm.method = "POST";
+        gatewayForm.action = body.checkout.url;
+        Object.entries(body.checkout.fields).forEach(([name, value]) => {
+          const input = document.createElement("input");
+          input.type = "hidden";
+          input.name = name;
+          input.value = value;
+          gatewayForm.appendChild(input);
+        });
+        document.body.appendChild(gatewayForm);
+        gatewayForm.submit();
+      }
+      return;
+    }
     const response = await authFetch(`${API_BASE}/subscriptions/requests`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requested_plan: form.get("requested_plan"), note: form.get("note") || null }),
+      body: JSON.stringify({ requested_plan: requestedPlan, note: form.get("note") || null }),
     });
     if (!response.ok) {
       const body = (await response.json().catch(() => ({}))) as { detail?: string };
@@ -97,6 +144,20 @@ export function SubscriptionModule() {
     setMessage("Yêu cầu nâng cấp đã được gửi tới quản trị viên.");
     setRequestOpen(false);
     await load();
+  }
+
+  async function selectPlan(planKey: string) {
+    setSelectedPlan(planKey);
+    setChangeQuote(null);
+    setError("");
+    if (planKey === "custom") return;
+    const response = await authFetch(`${API_BASE}/subscriptions/change/quote?requested_plan=${encodeURIComponent(planKey)}`);
+    const body = await response.json().catch(() => ({})) as ChangeQuote & { detail?: string };
+    if (!response.ok) {
+      setError(typeof body.detail === "string" ? body.detail : "Không thể tính giá thay đổi gói.");
+      return;
+    }
+    setChangeQuote(body);
   }
 
   async function saveByok(event: FormEvent<HTMLFormElement>) {
@@ -128,7 +189,7 @@ export function SubscriptionModule() {
       <section className="subscription-hero">
         <div><span>Gói hiện tại</span><h2>{data.plan.name}</h2><p>Trạng thái: {data.subscription.status}{data.subscription.expires_at ? ` · Hết hạn ${new Date(data.subscription.expires_at).toLocaleDateString("vi-VN")}` : ""}</p></div>
         <div><span>Kỳ sử dụng</span><strong>{data.period}</strong></div>
-        {user?.role === "user" && <button type="button" onClick={() => setRequestOpen(true)}>Yêu cầu nâng cấp</button>}
+        {user?.role === "user" && <button type="button" onClick={() => { setSelectedPlan(""); setChangeQuote(null); setRequestOpen(true); }}>Thay đổi gói</button>}
       </section>
       <section className="quota-grid">{Object.entries(data.resources).map(([key, resource]) =>
         <article className="quota-card" key={key}>
@@ -160,26 +221,39 @@ export function SubscriptionModule() {
     {requestOpen && data && <div className="sites-modal-layer">
       <button className="sites-modal-backdrop" onClick={() => setRequestOpen(false)} aria-label="Đóng" />
       <section className="sites-modal subscription-modal subscription-upgrade-modal" role="dialog" aria-modal="true">
-        <div className="sites-modal-header"><div><h2>Yêu cầu nâng cấp</h2><p>Gói hiện tại: {data.plan.name}</p></div><button onClick={() => setRequestOpen(false)}>×</button></div>
+        <div className="sites-modal-header"><div><h2>Thay đổi gói dịch vụ</h2><p>Gói hiện tại: {data.plan.name}</p></div><button onClick={() => setRequestOpen(false)}>×</button></div>
         <form onSubmit={submitRequest}>
           <div className="subscription-plan-options">{plans.map((plan) => {
             const view = planPresentation[plan.key] || {
               title: plan.name, price: "Liên hệ", action: `Chọn ${plan.name}`, features: [],
             };
             const current = plan.key === data.plan.key;
-            return <label className={`subscription-plan-card ${plan.key === "growth" ? "featured" : ""} ${current ? "current" : ""}`} key={plan.key}>
+            const unavailable = plan.key === "starter" && data.plan.key !== "legacy";
+            return <label className={`subscription-plan-card ${plan.key === "growth" ? "featured" : ""} ${current ? "current" : ""} ${unavailable ? "current" : ""}`} key={plan.key}>
               {view.badge && <span className="subscription-plan-badge">{view.badge}</span>}
-              <input type="radio" name="requested_plan" value={plan.key} required disabled={current} />
+              <input type="radio" name="requested_plan" value={plan.key} required disabled={current || unavailable} checked={selectedPlan === plan.key} onChange={() => void selectPlan(plan.key)} />
               <span className="subscription-plan-card-body">
                 <strong className="subscription-plan-name">{view.title}</strong>
                 <span className="subscription-plan-price">{view.price} {view.suffix && <small>{view.suffix}</small>}</span>
                 <span className="subscription-plan-features">{view.features.map((feature) => <span key={feature}><b>✓</b>{feature}</span>)}</span>
-                <span className="subscription-plan-action">{current ? "Gói hiện tại" : view.action}</span>
+                <span className="subscription-plan-action">{current ? "Gói hiện tại" : unavailable ? "Chỉ dành cho tài khoản mới" : view.action}</span>
               </span>
             </label>;
           })}</div>
-          <label>Lời nhắn<textarea name="note" rows={4} placeholder="Nhu cầu hoặc thông tin thanh toán..." /></label>
-          <div className="sites-modal-actions"><button type="button" onClick={() => setRequestOpen(false)}>Hủy</button><button className="sites-primary-button">Gửi yêu cầu</button></div>
+          {changeQuote && <div className="subscription-change-quote">
+            <span>Giá gói mới <b>{changeQuote.requested_price.toLocaleString("vi-VN")} VNĐ/tháng</b></span>
+            {changeQuote.direction === "upgrade" ? <>
+              <span>Phần chênh lệch còn lại trong kỳ <b>{changeQuote.subtotal.toLocaleString("vi-VN")} VNĐ</b></span>
+              <span>VAT (10%) <b>{changeQuote.vat.toLocaleString("vi-VN")} VNĐ</b></span>
+              <strong>Thanh toán ngay <b>{changeQuote.total.toLocaleString("vi-VN")} VNĐ</b></strong>
+            </> : <>
+              <span>Phí kỳ tiếp theo <b>{changeQuote.subtotal.toLocaleString("vi-VN")} VNĐ</b></span>
+              <span>VAT (10%) <b>{changeQuote.vat.toLocaleString("vi-VN")} VNĐ</b></span>
+              <strong>Thanh toán trước {changeQuote.total.toLocaleString("vi-VN")} VNĐ · Áp dụng từ {new Date(changeQuote.current_period_end).toLocaleDateString("vi-VN")}</strong>
+            </>}
+          </div>}
+          {selectedPlan === "custom" && <label>Lời nhắn<textarea name="note" rows={4} placeholder="Nhu cầu model, hạn mức hoặc thông tin triển khai..." /></label>}
+          <div className="sites-modal-actions"><button type="button" onClick={() => setRequestOpen(false)}>Hủy</button><button className="sites-primary-button" disabled={!selectedPlan || (selectedPlan !== "custom" && !changeQuote)}>{selectedPlan === "custom" ? "Gửi yêu cầu" : changeQuote?.direction === "downgrade" ? "Thanh toán kỳ tiếp theo" : "Thanh toán nâng cấp"}</button></div>
         </form>
       </section>
     </div>}

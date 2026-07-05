@@ -86,6 +86,8 @@ def decrypt_credential(value: str) -> str:
 
 async def provision_checkout_order(db, order: dict) -> dict:
     """Create the customer account and selected subscription exactly once."""
+    if order.get("order_type") == "subscription_change":
+        return await apply_subscription_change(db, order)
     if order.get("owner_id"):
         return order
 
@@ -110,6 +112,7 @@ async def provision_checkout_order(db, order: dict) -> dict:
     now = utcnow()
     starter = order["plan"] == "starter"
     trial_ends_at = now + timedelta(days=7) if starter else None
+    period_end = trial_ends_at if starter else now + timedelta(days=30)
     try:
         await db.db.subscriptions.update_one(
             {"owner_id": owner_id},
@@ -119,8 +122,11 @@ async def provision_checkout_order(db, order: dict) -> dict:
                 "status": "trialing" if starter else "active",
                 "custom_limits": {},
                 "started_at": now,
-                "expires_at": trial_ends_at,
+                "expires_at": period_end,
                 "trial_ends_at": trial_ends_at,
+                "current_period_start": now,
+                "current_period_end": period_end,
+                "billing_cycle": "monthly",
                 "source": "checkout",
                 "updated_at": now,
             }, "$setOnInsert": {"created_at": now}},
@@ -145,6 +151,63 @@ async def provision_checkout_order(db, order: dict) -> dict:
         raise
 
 
+async def apply_subscription_change(db, order: dict) -> dict:
+    """Activate a paid upgrade after IPN while retaining the billing boundary."""
+    if order.get("applied_at"):
+        return order
+    now = utcnow()
+    owner_id = order["owner_id"]
+    period_end = order["current_period_end"]
+    if period_end.tzinfo is None:
+        period_end = period_end.replace(tzinfo=timezone.utc)
+    downgrade = order.get("change_direction") == "downgrade"
+    if downgrade:
+        updates = {
+            "next_plan": order["plan"],
+            "next_plan_paid": True,
+            "cancel_at_period_end": True,
+            "billing_cycle": "monthly",
+            "updated_at": now,
+        }
+    else:
+        updates = {
+            "plan": order["plan"],
+            "status": "active",
+            "next_plan": None,
+            "next_plan_paid": False,
+            "cancel_at_period_end": False,
+            "current_period_start": order["current_period_start"],
+            "current_period_end": period_end,
+            "expires_at": period_end,
+            "billing_cycle": "monthly",
+            "updated_at": now,
+        }
+    await db.db.subscriptions.update_one(
+        {"owner_id": owner_id},
+        {"$set": updates, "$setOnInsert": {"owner_id": owner_id, "created_at": now}},
+        upsert=True,
+    )
+    await db.db.subscription_audit_logs.insert_one({
+        "owner_id": owner_id,
+        "action": "self_service_downgrade_prepaid" if downgrade else "self_service_upgrade_paid",
+        "from_plan": order.get("from_plan"),
+        "plan": order["plan"],
+        "order_id": order["order_id"],
+        "subtotal": order["subtotal"],
+        "vat": order["vat"],
+        "total": order["total"],
+        "created_at": now,
+    })
+    order_updates = {
+        "status": "completed",
+        "completed_at": now,
+        "applied_at": now,
+        "updated_at": now,
+    }
+    await db.db.checkout_orders.update_one({"_id": order["_id"]}, {"$set": order_updates})
+    return {**order, **order_updates}
+
+
 def public_order(
     order: dict,
     *,
@@ -153,6 +216,7 @@ def public_order(
 ) -> dict:
     result = {
         "order_id": order["order_id"],
+        "order_type": order.get("order_type", "signup"),
         "status": order["status"],
         "plan": order["plan"],
         "requested_plan": order["plan"],
@@ -169,6 +233,8 @@ def public_order(
         result["checkout"] = checkout
     if include_credentials and order["status"] == "completed" and order.get("password_encrypted"):
         expiry = order.get("credentials_expires_at")
+        if expiry and expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
         if not expiry or expiry > utcnow():
             result["password"] = decrypt_credential(order["password_encrypted"])
     return result

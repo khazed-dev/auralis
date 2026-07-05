@@ -1,5 +1,5 @@
 """Customer subscription and platform-admin management APIs."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 
 from bson import ObjectId
@@ -8,10 +8,21 @@ from pydantic import BaseModel, Field, field_validator
 from pymongo import ReturnDocument
 
 from app.database import get_mongodb
+from app.config import settings
 from app.routes.auth import require_account_admin, require_auth
+from app.services.payments import (
+    build_sepay_checkout,
+    generate_access_token,
+    generate_order_id,
+    hash_token,
+    public_order,
+    utcnow,
+)
 from app.services.subscriptions import (
     PLAN_CATALOG,
+    get_subscription,
     resolve_owner_id,
+    subscription_change_quote,
     subscription_summary,
 )
 
@@ -46,6 +57,10 @@ class UpgradeDecision(BaseModel):
     note: Optional[str] = Field(default=None, max_length=1000)
 
 
+class SubscriptionChange(BaseModel):
+    requested_plan: Literal["starter", "growth", "business"]
+
+
 def serialize_document(document: dict) -> dict:
     result = dict(document)
     if "_id" in result:
@@ -62,6 +77,81 @@ async def list_plans():
 async def my_subscription(user: dict = Depends(require_auth)):
     db = await get_mongodb()
     return await subscription_summary(db, await resolve_owner_id(db, user))
+
+
+@router.get("/change/quote")
+async def change_quote(
+    requested_plan: Literal["starter", "growth", "business"],
+    user: dict = Depends(require_auth),
+):
+    if user.get("role") != "user":
+        raise HTTPException(status_code=403, detail="Chỉ chủ website có thể đổi gói")
+    db = await get_mongodb()
+    subscription = await get_subscription(db, str(user["_id"]))
+    if subscription.get("next_plan_paid"):
+        raise HTTPException(status_code=409, detail="Bạn đã thanh toán cho một thay đổi gói ở kỳ tiếp theo")
+    return subscription_change_quote(subscription, requested_plan)
+
+
+@router.post("/change", status_code=201)
+async def change_subscription(
+    body: SubscriptionChange,
+    user: dict = Depends(require_auth),
+):
+    """Schedule a downgrade or create a prorated SePay checkout for an upgrade."""
+    if user.get("role") != "user":
+        raise HTTPException(status_code=403, detail="Chỉ chủ website có thể đổi gói")
+    db = await get_mongodb()
+    owner_id = str(user["_id"])
+    subscription = await get_subscription(db, owner_id)
+    if subscription.get("next_plan_paid"):
+        raise HTTPException(status_code=409, detail="Bạn đã thanh toán cho một thay đổi gói ở kỳ tiếp theo")
+    quote = subscription_change_quote(subscription, body.requested_plan)
+    now = utcnow()
+
+    if not all((
+        settings.SEPAY_ENABLED, settings.SEPAY_MERCHANT_ID,
+        settings.SEPAY_MERCHANT_SECRET_KEY, settings.SEPAY_IPN_SECRET_KEY,
+        settings.SEPAY_CHECKOUT_URL,
+    )):
+        raise HTTPException(status_code=503, detail="Thanh toán SePay chưa được cấu hình đầy đủ")
+    pending = await db.db.checkout_orders.find_one({
+        "owner_id": owner_id,
+        "order_type": "subscription_change",
+        "status": {"$in": ["pending", "processing"]},
+        "expires_at": {"$gt": now},
+    })
+    if pending:
+        raise HTTPException(status_code=409, detail="Bạn đang có một giao dịch nâng cấp chưa hoàn tất")
+
+    access_token = generate_access_token()
+    order = {
+        "order_id": generate_order_id(),
+        "order_type": "subscription_change",
+        "access_token_hash": hash_token(access_token),
+        "owner_id": owner_id,
+        "email": str(user.get("email") or "").lower(),
+        "company_name": user.get("name") or user.get("email"),
+        "from_plan": quote["current_plan"],
+        "plan": body.requested_plan,
+        "change_direction": quote["direction"],
+        "payment_method": "bank_transfer",
+        "subtotal": quote["subtotal"],
+        "discount": 0,
+        "vat": quote["vat"],
+        "total": quote["total"],
+        "status": "pending",
+        "current_period_start": quote["current_period_start"],
+        "current_period_end": quote["current_period_end"],
+        "expires_at": now + timedelta(minutes=settings.PAYMENT_ORDER_EXPIRE_MINUTES),
+        "created_at": now,
+        "updated_at": now,
+    }
+    inserted = await db.db.checkout_orders.insert_one(order)
+    order["_id"] = inserted.inserted_id
+    response = public_order(order, checkout=build_sepay_checkout(order))
+    response["access_token"] = access_token
+    return response
 
 
 @router.get("/requests/me")
