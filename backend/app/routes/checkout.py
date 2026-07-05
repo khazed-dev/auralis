@@ -293,6 +293,14 @@ async def sepay_ipn(request: Request):
         )
         return {"success": True}
     if order["status"] == "completed":
+        await db.db.checkout_orders.update_one(
+            {"_id": order["_id"]},
+            {"$set": {
+                "sepay_transaction_id": transaction_id,
+                "sepay_order_id": sepay_order.get("order_id"),
+                "updated_at": utcnow(),
+            }},
+        )
         return {"success": True}
     if order["status"] != "pending":
         return {"success": True}

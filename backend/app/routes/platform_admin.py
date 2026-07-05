@@ -159,11 +159,19 @@ async def customer_detail(customer_id: str, _admin: dict = Depends(require_platf
     if not user or user.get("role") != "user":
         raise HTTPException(status_code=404, detail="Không tìm thấy khách hàng")
     summary = await subscription_summary(db, customer_id)
+    sites = await db.db.sites.find(
+        {"user_id": customer_id},
+        {"site_id": 1, "name": 1, "url": 1, "status": 1},
+    ).to_list(500)
+    members = await db.db.users.find(
+        {"owner_id": customer_id, "role": "agent"},
+        {"email": 1, "name": 1, "active": 1},
+    ).to_list(500)
     return {
         "user": {key: value for key, value in serialize(user).items() if key not in {"password_hash", "refresh_token_hash"}},
         **summary,
-        "sites": await db.db.sites.find({"user_id": customer_id}, {"site_id": 1, "name": 1, "url": 1, "status": 1}).to_list(500),
-        "members": await db.db.users.find({"owner_id": customer_id, "role": "agent"}, {"email": 1, "name": 1, "active": 1}).to_list(500),
+        "sites": [serialize(site) for site in sites],
+        "members": [serialize(member) for member in members],
         "payments": [serialize(row) for row in await db.db.checkout_orders.find({"owner_id": customer_id}).sort("created_at", -1).to_list(100)],
         "audit_logs": [serialize(row) for row in await db.db.subscription_audit_logs.find({"owner_id": customer_id}).sort("created_at", -1).to_list(100)],
     }
@@ -219,16 +227,21 @@ async def reconcile_payment(order_id: str, request: Request, admin: dict = Depen
     order = await db.db.checkout_orders.find_one({"order_id": order_id})
     if not order:
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn Auralis")
-    sepay_order_id = order.get("sepay_order_id")
-    if not sepay_order_id:
-        transaction = await db.db.payment_transactions.find_one({"order_id": order_id})
-        sepay_order_id = ((transaction or {}).get("payload") or {}).get("order", {}).get("order_id")
-    if not sepay_order_id:
-        raise HTTPException(status_code=409, detail="Đơn chưa có SePay order ID để đối soát")
-    provider = await fetch_sepay_order(sepay_order_id)
+    provider = await fetch_sepay_order(order_id)
+    provider_order = provider.get("data") or {}
+    sepay_order_id = provider_order.get("order_id")
+    if sepay_order_id:
+        await db.db.checkout_orders.update_one(
+            {"_id": order["_id"]},
+            {"$set": {
+                "sepay_order_id": sepay_order_id,
+                "updated_at": datetime.now(timezone.utc),
+            }},
+        )
+        order["sepay_order_id"] = sepay_order_id
     await audit(db, admin, request, "payment_reconciled", "payment", order_id, None, {
         "sepay_order_id": sepay_order_id,
-        "provider_status": (provider.get("data") or {}).get("order_status"),
+        "provider_status": provider_order.get("order_status"),
     })
     return {"local": serialize(order), "provider": provider}
 
