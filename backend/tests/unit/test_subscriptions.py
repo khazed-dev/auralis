@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -7,6 +8,7 @@ from app.services.subscriptions import (
     PLAN_CATALOG,
     effective_limits,
     enforce_quota,
+    get_subscription,
     subscription_summary,
 )
 
@@ -57,3 +59,27 @@ async def test_inactive_subscription_is_rejected():
         await enforce_quota(db, "owner-1", "messages")
     assert exc.value.status_code == 403
     assert exc.value.detail["code"] == "subscription_inactive"
+
+
+@pytest.mark.asyncio
+async def test_previous_checkout_starter_is_repaired_to_selected_paid_plan():
+    subscription = {
+        "_id": "subscription-1",
+        "owner_id": "owner-1",
+        "plan": "starter",
+        "status": "trialing",
+        "trial_ends_at": datetime.now(timezone.utc),
+    }
+    db = mongo_with(subscription, {})
+    db.db.checkout_orders.find_one = AsyncMock(return_value={
+        "owner_id": "owner-1",
+        "plan": "growth",
+        "status": "completed",
+    })
+    db.db.subscriptions.update_one = AsyncMock()
+
+    repaired = await get_subscription(db, "owner-1")
+
+    assert repaired["plan"] == "growth"
+    assert repaired["status"] == "active"
+    assert repaired["expires_at"] is None
