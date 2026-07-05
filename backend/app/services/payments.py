@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -28,6 +29,40 @@ def generate_access_token() -> str:
 
 def hash_token(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+SEPAY_SIGNED_FIELDS = (
+    "order_amount", "merchant", "currency", "operation",
+    "order_description", "order_invoice_number", "customer_id",
+    "payment_method", "success_url", "error_url", "cancel_url",
+)
+
+
+def build_sepay_checkout(order: dict) -> dict:
+    """Build the exact ordered, signed form required by SePay Payment Gateway."""
+    base_url = (settings.PAYMENT_RETURN_BASE_URL or settings.SITE_URL).rstrip("/")
+    return_url = f"{base_url}/checkout"
+    fields = {
+        "order_amount": str(int(order["total"])),
+        "merchant": settings.SEPAY_MERCHANT_ID,
+        "currency": "VND",
+        "operation": "PURCHASE",
+        "order_description": f"Thanh toan goi {order['plan']} Auralis - {order['order_id']}",
+        "order_invoice_number": order["order_id"],
+        "payment_method": "BANK_TRANSFER",
+        "success_url": f"{return_url}?payment=success&order={order['order_id']}",
+        "error_url": f"{return_url}?payment=error&order={order['order_id']}",
+        "cancel_url": f"{return_url}?payment=cancel&order={order['order_id']}",
+    }
+    signed = ",".join(f"{name}={fields[name]}" for name in SEPAY_SIGNED_FIELDS if name in fields)
+    fields["signature"] = base64.b64encode(
+        hmac.new(
+            settings.SEPAY_MERCHANT_SECRET_KEY.encode(),
+            signed.encode(),
+            hashlib.sha256,
+        ).digest()
+    ).decode()
+    return {"url": settings.SEPAY_CHECKOUT_URL, "fields": fields}
 
 
 def _credential_cipher() -> Fernet:
@@ -110,7 +145,12 @@ async def provision_checkout_order(db, order: dict) -> dict:
         raise
 
 
-def public_order(order: dict, *, include_credentials: bool = False) -> dict:
+def public_order(
+    order: dict,
+    *,
+    include_credentials: bool = False,
+    checkout: dict | None = None,
+) -> dict:
     result = {
         "order_id": order["order_id"],
         "status": order["status"],
@@ -125,14 +165,8 @@ def public_order(order: dict, *, include_credentials: bool = False) -> dict:
         "expires_at": order.get("expires_at"),
         "trial_ends_at": order.get("trial_ends_at"),
     }
-    if order["status"] == "pending":
-        result["payment"] = {
-            "bank_code": settings.SEPAY_BANK_CODE,
-            "account_number": settings.SEPAY_BANK_ACCOUNT,
-            "account_name": settings.SEPAY_ACCOUNT_NAME,
-            "amount": order["total"],
-            "content": order["order_id"],
-        }
+    if checkout:
+        result["checkout"] = checkout
     if include_credentials and order["status"] == "completed" and order.get("password_encrypted"):
         expiry = order.get("credentials_expires_at")
         if not expiry or expiry > utcnow():
