@@ -52,10 +52,17 @@
     primaryColor: scriptEl?.dataset?.primaryColor || "#3366cc",
     title: scriptEl?.dataset?.title || "Ask AI",
     welcomeMessage: "Bạn đang cần tìm sản phẩm hoặc tư vấn giải pháp nào?",
+    botAvatarUrl: null,
     showSources: true,
     hideBranding: false,
     customBrandingText: null,
     customBrandingUrl: null,
+    quickPrompts: {
+      enabled: true,
+      prompts: [],
+      showAfterResponse: false,
+      maxDisplay: 4,
+    },
   };
 
   const CHAT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -115,10 +122,19 @@
       if (G["ok"]) {
         const H = await G["json"]();
         H["appearance"] && (config.primaryColor = H["appearance"]["primary_color"] || config.primaryColor, config.title = H["appearance"]["chat_title"] || config.title,
-          config.welcomeMessage = H["appearance"]["welcome_message"] || config.welcomeMessage, config.position = H["appearance"]["position"] || config.position,
+          config.welcomeMessage = H["appearance"]["welcome_message"] || config.welcomeMessage, config.botAvatarUrl = H["appearance"]["bot_avatar_url"] || null,
+          config.position = H["appearance"]["position"] || config.position,
           config.hideBranding = H["appearance"]["hide_branding"] === true, config.customBrandingText = H["appearance"]["custom_branding_text"] || null,
-          config.customBrandingUrl = H["appearance"]["custom_branding_url"] || null), H["behavior"] && (config.showSources = H["behavior"]["show_sources"] !== false),
-          injectDynamicThemeStyles(), syncHeaderAndWelcomeText(), updateBrandingFooter();
+          config.customBrandingUrl = H["appearance"]["custom_branding_url"] || null), H["behavior"] && (config.showSources = H["behavior"]["show_sources"] !== false);
+        if (H["quick_prompts"]) {
+          config.quickPrompts = {
+            enabled: H["quick_prompts"]["enabled"] !== false,
+            prompts: Array.isArray(H["quick_prompts"]["prompts"]) ? H["quick_prompts"]["prompts"] : [],
+            showAfterResponse: H["quick_prompts"]["show_after_response"] === true,
+            maxDisplay: Number(H["quick_prompts"]["max_display"] || 4),
+          };
+        }
+        injectDynamicThemeStyles(), syncHeaderAndWelcomeText(), syncQuickPrompts(), updateBrandingFooter();
       }
     } catch (I) {
       console["warn"]("Could not fetch site config, using defaults:", I);
@@ -129,6 +145,15 @@
     G && G["remove"]();
     const H = document["createElement"]("style");
     H["id"] = "sitechat-dynamic-styles", H["textContent"] = "\n      .sitechat-toggle {\n        background: linear-gradient(135deg, " + config.primaryColor + ", " + adjustHexColor(config.primaryColor, -20) + ") !important;\n      }\n      .sitechat-header {\n        background: linear-gradient(135deg, " + config.primaryColor + ", " + adjustHexColor(config.primaryColor, -20) + ") !important;\n      }\n      .sitechat-avatar.bot {\n        background: linear-gradient(135deg, " + config.primaryColor + ", " + adjustHexColor(config.primaryColor, -30) + ") !important;\n        box-shadow: 0 2px 8px " + config.primaryColor + "40 !important;\n      }\n      .sitechat-message.user {\n        background: linear-gradient(135deg, " + config.primaryColor + ", " + adjustHexColor(config.primaryColor, -25) + ") !important;\n        box-shadow: 0 2px 12px " + config.primaryColor + "30 !important;\n      }\n      .sitechat-typing span {\n        background: linear-gradient(135deg, " + config.primaryColor + ", " + adjustHexColor(config.primaryColor, -20) + ") !important;\n      }\n      .sitechat-send {\n        background: linear-gradient(135deg, " + config.primaryColor + ", " + adjustHexColor(config.primaryColor, -20) + ") !important;\n      }\n      .sitechat-welcome-icon {\n        background: linear-gradient(135deg, " + config.primaryColor + "15, " + config.primaryColor + "25) !important;\n      }\n      .sitechat-welcome-icon::before {\n        background: linear-gradient(135deg, " + config.primaryColor + "40, transparent) !important;\n      }\n      .sitechat-welcome-icon svg {\n        color: " + config.primaryColor + " !important;\n      }\n      .sitechat-suggestion:hover {\n        background: " + config.primaryColor + "08 !important;\n        border-color: " + config.primaryColor + "30 !important;\n        color: " + config.primaryColor + " !important;\n      }\n      .sitechat-source-link {\n        color: " + config.primaryColor + " !important;\n        background: linear-gradient(135deg, " + config.primaryColor + "08, " + config.primaryColor + "12) !important;\n        border: 1px solid " + config.primaryColor + "20 !important;\n      }\n      .sitechat-source-link:hover {\n        background: linear-gradient(135deg, " + config.primaryColor + "15, " + config.primaryColor + "20) !important;\n        border-color: " + config.primaryColor + "40 !important;\n        box-shadow: 0 2px 8px " + config.primaryColor + "20 !important;\n      }\n      .sitechat-message.bot code {\n        color: " + config.primaryColor + " !important;\n      }\n      .sitechat-feedback-btn.active {\n        border-color: " + config.primaryColor + "40 !important;\n      }\n    ",
+    H["textContent"] += "\n.sitechat-toggle {" +
+      (config.position === "bottom-left"
+        ? "left:24px !important;right:auto !important;"
+        : "right:24px !important;left:auto !important;") +
+      "}\n.sitechat-window,.sitechat-nudge {" +
+      (config.position === "bottom-left"
+        ? "left:24px !important;right:auto !important;"
+        : "right:24px !important;left:auto !important;") +
+      "}";
       document["head"]["appendChild"](H);
   }
   function injectResponsiveStyles() {
@@ -234,6 +259,45 @@
     const H = document["querySelector"](".sitechat-welcome h4"), I = document["querySelector"](".sitechat-welcome p");
     if (H) H["textContent"] = "Xin chào! 👋";
     if (I) I["textContent"] = config.welcomeMessage;
+    if (config.botAvatarUrl) {
+      document["querySelectorAll"](".sitechat-header-icon, .sitechat-welcome-icon, .sitechat-avatar.bot")["forEach"](setBotAvatar);
+    }
+  }
+  function setBotAvatar(element) {
+    if (!element || !config.botAvatarUrl) return;
+    const image = document["createElement"]("img");
+    image["src"] = config.botAvatarUrl;
+    image["alt"] = "";
+    Object["assign"](image["style"], {
+      width: "100%",
+      height: "100%",
+      objectFit: "cover",
+      borderRadius: "inherit",
+    });
+    element["replaceChildren"](image);
+  }
+  function activeQuickPrompts() {
+    if (!config.quickPrompts.enabled) return [];
+    return config.quickPrompts.prompts
+      .filter(prompt => prompt && prompt.enabled !== false && prompt.text)
+      .slice(0, config.quickPrompts.maxDisplay);
+  }
+  function fillQuickPrompts(container) {
+    if (!container) return;
+    const prompts = activeQuickPrompts();
+    container["innerHTML"] = "";
+    container["style"]["display"] = prompts.length ? "flex" : "none";
+    prompts.forEach(prompt => {
+      const button = document["createElement"]("button");
+      button["type"] = "button";
+      button["className"] = "sitechat-suggestion";
+      button["dataset"]["query"] = prompt.text;
+      button["textContent"] = (prompt.icon ? prompt.icon + "  " : "") + prompt.text;
+      container["appendChild"](button);
+    });
+  }
+  function syncQuickPrompts() {
+    fillQuickPrompts(document["querySelector"](".sitechat-welcome-suggestions"));
   }
   function updateBrandingFooter() {
     const G = document["querySelector"](".sitechat-branding");
@@ -680,14 +744,7 @@
   if (welcomeTitle) welcomeTitle["textContent"] = "Xin chào! 👋";
   const welcomeText = widgetRoot["querySelector"](".sitechat-welcome p");
   if (welcomeText) welcomeText["textContent"] = config.welcomeMessage;
-  const suggestionButtons = widgetRoot["querySelectorAll"](".sitechat-suggestion");
-  const suggestions = ["Tìm sản phẩm phù hợp", "Giới thiệu về Công ty chúng tôi"];
-  suggestionButtons["forEach"]((button, index) => {
-    if (suggestions[index]) {
-      button["textContent"] = suggestions[index];
-      button["dataset"]["query"] = suggestions[index];
-    }
-  });
+  syncQuickPrompts();
   const messageInput = widgetRoot["querySelector"](".sitechat-input");
   if (messageInput) messageInput["placeholder"] = "Nhập nội dung cần tư vấn...";
   const newChatButton = document["createElement"]("button");
@@ -819,6 +876,8 @@
     sessionId = createSessionId();
     saveSession(sessionId, Date.now() + CHAT_SESSION_TTL_MS);
     messagesEl["innerHTML"] = initialWelcomeHtml;
+    syncHeaderAndWelcomeText();
+    syncQuickPrompts();
     welcomeRemoved = false;
     lastMessageIndex = -1;
     handoffState.mode = "ai";
@@ -955,6 +1014,13 @@
         M["appendChild"](R);
     }
     K["appendChild"](L), K["appendChild"](M), messagesEl["appendChild"](K), messagesEl["scrollTop"] = messagesEl["scrollHeight"];
+    if (H === "bot") setBotAvatar(L);
+    if (H === "bot" && config.quickPrompts.showAfterResponse) {
+      const promptRow = document["createElement"]("div");
+      promptRow["className"] = "sitechat-welcome-suggestions sitechat-after-response-prompts";
+      fillQuickPrompts(promptRow);
+      if (promptRow["childElementCount"]) messagesEl["appendChild"](promptRow);
+    }
     if (options.persist !== false) {
       persistMessage(G, H, I, messageTime["toISOString"]());
     }
@@ -979,6 +1045,7 @@
     const H = document["createElement"]("div");
     H["className"] = "sitechat-avatar bot", H["innerHTML"] = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n      <path d="M12 2L2 7l10 5 10-5-10-5z"/>\n      <path d="M2 17l10 5 10-5"/>\n      <path d="M2 12l10 5 10-5"/>\n    </svg>';
     const I = document["createElement"]("div");
+    setBotAvatar(H);
     return I["className"] = "sitechat-typing", I["innerHTML"] = "<span></span><span></span><span></span>", G["appendChild"](H),
       G["appendChild"](I), messagesEl["appendChild"](G), messagesEl["scrollTop"] = messagesEl["scrollHeight"], G;
   }

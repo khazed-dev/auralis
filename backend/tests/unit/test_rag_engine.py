@@ -511,12 +511,42 @@ class TestRAGEngineIntegration:
     def test_get_system_prompt_without_site(self, rag_engine):
         """System prompt should use generic description without site name."""
         prompt = rag_engine._get_system_prompt()
-        assert "this website" in prompt
+        assert "website này" in prompt
+        assert "tư vấn bán hàng" not in prompt
     
     def test_get_system_prompt_with_site(self, rag_engine):
         """System prompt should include site name when provided."""
         prompt = rag_engine._get_system_prompt("TestSite")
         assert "TestSite" in prompt
+
+    def test_get_system_prompt_prefers_site_behavior(self, rag_engine):
+        prompt = rag_engine._get_system_prompt(
+            "University",
+            "Bạn là trợ lý tuyển sinh, trả lời thân thiện cho thí sinh.",
+        )
+        assert "trợ lý tuyển sinh" in prompt
+        assert "tư vấn bán hàng" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_generate_response_uses_site_behavior(
+        self, rag_engine, mock_ollama_service
+    ):
+        await rag_engine._generate_response(
+            question="Học phí bao nhiêu?",
+            context="Thông tin học phí",
+            history=[],
+            site_name="University",
+            behavior={
+                "system_prompt": "Bạn là trợ lý tuyển sinh.",
+                "temperature": 0.2,
+                "max_tokens": 320,
+            },
+        )
+
+        _, system_prompt = mock_ollama_service.generate.call_args.args[:2]
+        assert "trợ lý tuyển sinh" in system_prompt
+        assert mock_ollama_service.generate.call_args.kwargs["temperature"] == 0.2
+        assert mock_ollama_service.generate.call_args.kwargs["max_tokens"] == 320
     
     def test_build_prompt_without_history(self, rag_engine):
         """Prompt should be built correctly without history."""
