@@ -6,6 +6,13 @@ Usage:
 """
 import argparse
 import asyncio
+import sys
+from pathlib import Path
+
+# Allow direct execution from backend/: python scripts/migrate_dynamic_plans.py
+backend_root = Path(__file__).resolve().parents[1]
+if str(backend_root) not in sys.path:
+    sys.path.insert(0, str(backend_root))
 
 from app.database import get_mongodb
 from app.services.plans import DEFAULT_PLANS, backfill_subscription_snapshots, seed_default_plans
