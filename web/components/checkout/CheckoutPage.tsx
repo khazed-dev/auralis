@@ -1,9 +1,9 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { BrandLogo } from "@/components/ui/BrandLogo";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
 const plans = {
@@ -120,7 +120,7 @@ export function CheckoutPage() {
   if (order) return <PaymentWaiting order={order} />;
 
   return <div className="checkout-page">
-    <header className="checkout-header"><Link href="/"><Image src="/logo-auralis.png" alt="Auralis" width={144} height={48} /></Link><span>▣ &nbsp; THANH TOÁN BẢO MẬT</span></header>
+    <header className="checkout-header"><Link href="/"><BrandLogo /></Link><span>▣ &nbsp; THANH TOÁN BẢO MẬT</span></header>
     <form className="checkout-layout" onSubmit={submit}>
       <aside>
         <section className="checkout-card order-summary">

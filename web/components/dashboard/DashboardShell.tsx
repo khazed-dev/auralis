@@ -57,10 +57,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         setUser(currentUser);
         if (
           currentUser.role === "platform_admin" &&
-          !pathname.startsWith("/dashboard/admin/subscriptions") &&
-          pathname !== "/dashboard/team"
+          pathname.startsWith("/dashboard")
         ) {
-          router.replace("/dashboard/team");
+          router.replace("/platform");
         }
         if (currentUser.role === "agent" && pathname === "/dashboard/sites") {
           router.replace("/dashboard/handoffs");

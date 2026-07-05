@@ -1,7 +1,7 @@
-import Image from "next/image";
 import Link from "next/link";
 
 import { Pricing } from "@/components/landing/Pricing";
+import { BrandLogo } from "@/components/ui/BrandLogo";
 
 export function RegisterPage() {
   return (
@@ -9,7 +9,7 @@ export function RegisterPage() {
       <header className="register-header">
         <div className="container register-header-inner">
           <Link href="/" aria-label="Về trang chủ Auralis">
-            <Image src="/logo-auralis.png" alt="Auralis" width={144} height={48} priority />
+            <BrandLogo priority />
           </Link>
           <div>
             <span>Đã có tài khoản?</span>

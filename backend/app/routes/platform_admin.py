@@ -22,7 +22,11 @@ def serialize(document: dict) -> dict:
         if isinstance(value, ObjectId):
             return str(value)
         if isinstance(value, dict):
-            return {key: clean(item) for key, item in value.items()}
+            hidden = {
+                "password_hash", "refresh_token_hash", "password_encrypted",
+                "access_token_hash", "api_key_encrypted",
+            }
+            return {key: clean(item) for key, item in value.items() if key not in hidden}
         if isinstance(value, list):
             return [clean(item) for item in value]
         return value

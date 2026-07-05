@@ -18,7 +18,7 @@ export const DEV_AUTH_ENABLED =
   process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === "true";
 
 export function getDashboardHome(role: DashboardUser["role"]): string {
-  if (role === "platform_admin") return "/dashboard/team";
+  if (role === "platform_admin") return "/platform";
   if (role === "agent") return "/dashboard/handoffs";
   return "/dashboard/sites";
 }
