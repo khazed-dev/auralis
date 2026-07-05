@@ -5,17 +5,16 @@ import { FormEvent, useState } from "react";
 import {
   createDevSession,
   DEV_AUTH_ENABLED,
+  getDashboardHome,
   type DashboardUser,
 } from "@/lib/auth";
 
 type LoginResponse = {
   access_token: string;
-  user: unknown;
+  user: DashboardUser;
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
-const POST_LOGIN_PATH =
-  process.env.NEXT_PUBLIC_POST_LOGIN_PATH ?? "/dashboard";
 
 export function LoginForm() {
   const [error, setError] = useState("");
@@ -47,7 +46,7 @@ export function LoginForm() {
           );
         }
         createDevSession(devData.user);
-        window.location.assign(POST_LOGIN_PATH);
+        window.location.assign(getDashboardHome(devData.user.role));
         return;
       }
 
@@ -77,7 +76,9 @@ export function LoginForm() {
       if (data.user) {
         localStorage.setItem("user", JSON.stringify(data.user));
       }
-      window.location.assign(POST_LOGIN_PATH);
+      window.location.assign(
+        data.user ? getDashboardHome(data.user.role) : "/dashboard",
+      );
     } catch (loginError) {
       setError(
         loginError instanceof Error

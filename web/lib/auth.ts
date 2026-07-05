@@ -17,6 +17,12 @@ export const DEV_AUTH_ENABLED =
   process.env.NODE_ENV === "development" &&
   process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === "true";
 
+export function getDashboardHome(role: DashboardUser["role"]): string {
+  if (role === "platform_admin") return "/dashboard/team";
+  if (role === "agent") return "/dashboard/handoffs";
+  return "/dashboard/sites";
+}
+
 const DEV_USER: DashboardUser = {
   id: "local-development-user",
   email: "local@auralis.test",

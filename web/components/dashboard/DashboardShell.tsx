@@ -60,7 +60,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           !pathname.startsWith("/dashboard/admin/subscriptions") &&
           pathname !== "/dashboard/team"
         ) {
-          router.replace("/dashboard/admin/subscriptions");
+          router.replace("/dashboard/team");
         }
         if (currentUser.role === "agent" && pathname === "/dashboard/sites") {
           router.replace("/dashboard/handoffs");
