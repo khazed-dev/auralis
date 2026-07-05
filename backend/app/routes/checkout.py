@@ -15,6 +15,11 @@ router = APIRouter(prefix="/api/checkout", tags=["checkout"])
 PLAN_PRICES = {"starter": 0, "growth": 2_400_000, "business": 9_800_000}
 
 
+def generate_checkout_password() -> str:
+    """Generate a strong password that is also easy to copy and type."""
+    return f"Au!7{secrets.token_hex(6)}"
+
+
 class PromoCreate(BaseModel):
     code: str = Field(min_length=3, max_length=40)
     percent_off: int = Field(ge=1, le=100)
@@ -85,13 +90,16 @@ async def complete_checkout(body: CheckoutRequest):
         raise HTTPException(status_code=503, detail="Cổng thanh toán chưa được kích hoạt")
     if await db.get_user_by_email(str(body.email).lower()):
         raise HTTPException(status_code=409, detail="Email này đã có tài khoản")
-    password = f"Au!7{secrets.token_urlsafe(8)}"
+    password = generate_checkout_password()
     auth = AuthService(db)
     user = await auth.create_user(UserCreate(
         email=body.email, password=password, name=body.company_name,
     ), role=UserRole.USER)
     if not user:
         raise HTTPException(status_code=409, detail="Không thể tạo tài khoản")
+    if not await auth.authenticate_user(str(body.email).lower(), password):
+        await db.db.users.delete_one({"user_id": str(user.get("user_id") or user["_id"])})
+        raise HTTPException(status_code=500, detail="Generated account password could not be verified")
     # AuthService returns the provider UUID after insertion; tenant ownership elsewhere
     # uses the persisted Mongo _id, so reload the document before creating subscription data.
     persisted_user = await db.get_user_by_id(str(user.get("user_id") or user["_id"]))
@@ -100,15 +108,17 @@ async def complete_checkout(body: CheckoutRequest):
     owner_id = str(persisted_user["_id"])
     provider_user_id = str(persisted_user.get("user_id") or user.get("user_id"))
     now = datetime.now(timezone.utc)
-    trial_ends_at = now + timedelta(days=7)
+    is_starter_trial = body.plan == "starter"
+    trial_ends_at = now + timedelta(days=7) if is_starter_trial else None
+    subscription_status = "trialing" if is_starter_trial else "active"
     order_id = f"AUR-{now.strftime('%y%m%d')}-{secrets.token_hex(3).upper()}"
     try:
         await db.db.subscriptions.update_one(
             {"owner_id": owner_id},
             {"$set": {
-                "owner_id": owner_id, "plan": "starter", "status": "trialing",
+                "owner_id": owner_id, "plan": body.plan, "status": subscription_status,
                 "custom_limits": {}, "started_at": now, "expires_at": trial_ends_at,
-                "trial_ends_at": trial_ends_at, "updated_at": now,
+                "trial_ends_at": trial_ends_at, "source": "checkout", "updated_at": now,
             }, "$setOnInsert": {"created_at": now}},
             upsert=True,
         )
@@ -128,7 +138,7 @@ async def complete_checkout(body: CheckoutRequest):
         await db.db.users.delete_one({"user_id": provider_user_id})
         raise
     return {
-        "order_id": order_id, "plan": "starter", "requested_plan": body.plan,
+        "order_id": order_id, "plan": body.plan, "requested_plan": body.plan,
         "trial_ends_at": trial_ends_at, "email": str(body.email).lower(),
         "password": password, "payment_method": body.payment_method, "total": pricing["total"],
     }

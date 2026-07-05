@@ -71,13 +71,43 @@ async def get_subscription(db, owner_id: str) -> dict:
                     started = checkout.get("created_at") or datetime.now(timezone.utc)
                     if started.tzinfo is None:
                         started = started.replace(tzinfo=timezone.utc)
+                    checkout_plan = checkout.get("plan") or "starter"
+                    is_starter = checkout_plan == "starter"
+                    trial_ends_at = started + timedelta(days=7) if is_starter else None
                     updates.update({
-                        "plan": "starter", "status": "trialing",
-                        "started_at": started, "trial_ends_at": started + timedelta(days=7),
-                        "expires_at": started + timedelta(days=7),
+                        "plan": checkout_plan,
+                        "status": "trialing" if is_starter else "active",
+                        "started_at": started,
+                        "trial_ends_at": trial_ends_at,
+                        "expires_at": trial_ends_at,
+                        "source": "checkout",
                     })
                 await db.db.subscriptions.update_one({"_id": document["_id"]}, {"$set": updates})
                 document.update(updates)
+    # Repair accounts provisioned by the previous checkout implementation,
+    # which assigned Starter even when a paid plan was selected.
+    if (
+        document
+        and document.get("plan") == "starter"
+        and document.get("status") == "trialing"
+        and document.get("trial_ends_at")
+    ):
+        checkout = await db.db.checkout_orders.find_one(
+            {"owner_id": owner_id, "status": "completed"},
+            sort=[("created_at", -1)],
+        )
+        checkout_plan = (checkout or {}).get("plan")
+        if checkout_plan in {"growth", "business"}:
+            updates = {
+                "plan": checkout_plan,
+                "status": "active",
+                "trial_ends_at": None,
+                "expires_at": None,
+                "source": "checkout",
+                "updated_at": datetime.now(timezone.utc),
+            }
+            await db.db.subscriptions.update_one({"_id": document["_id"]}, {"$set": updates})
+            document.update(updates)
     if not document:
         return {
             "owner_id": owner_id,
