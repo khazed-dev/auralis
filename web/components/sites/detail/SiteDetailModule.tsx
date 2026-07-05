@@ -51,7 +51,7 @@ const defaultConfig: SiteConfig = {
   },
   behavior: {
     system_prompt:
-      "Bạn là trợ lý AI hữu ích. Chỉ trả lời dựa trên dữ liệu được cung cấp và nói rõ khi chưa đủ thông tin.",
+      "Bạn là trợ lý AI của website. Hãy hỗ trợ người dùng dựa trên dữ liệu của website, với giọng điệu rõ ràng, lịch sự và phù hợp với lĩnh vực của tổ chức.",
     temperature: 0.7,
     max_tokens: 500,
     show_sources: true,
@@ -286,6 +286,9 @@ export function SiteDetailModule({ siteId }: { siteId: string }) {
               config={config.appearance}
               onSave={(value) => saveConfig("appearance", value)}
               onReset={resetConfig}
+              siteId={siteId}
+              siteUrl={site.url}
+              quickPrompts={config.quick_prompts}
             />
           )}
           {tab === "behavior" && (

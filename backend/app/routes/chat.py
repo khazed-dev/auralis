@@ -1,7 +1,7 @@
 """
 Chat API routes.
 """
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -13,6 +13,8 @@ from app.database import get_mongodb
 from app.config import settings
 from app.core.security import get_client_ip
 from app.routes.dependencies import require_widget_site
+from app.routes.auth import require_auth
+from app.core.site_access import can_manage_site
 from app.services.subscriptions import enforce_quota, increment_usage
 from app.services.byok import record_model_usage, tenant_llm_for_site
 
@@ -103,6 +105,46 @@ async def chat(request: Request, body: ChatRequest):
     except Exception as e:
         logger.error(f"Chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/preview", response_model=ChatResponse)
+@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/minute")
+async def preview_chat(
+    request: Request,
+    body: ChatRequest,
+    user: dict = Depends(require_auth),
+):
+    """Run the real site-scoped RAG flow from the authenticated dashboard."""
+    if not body.site_id:
+        raise HTTPException(status_code=422, detail="site_id is required")
+    try:
+        mongodb = await get_mongodb()
+        site = await mongodb.get_site(body.site_id)
+        if not site:
+            raise HTTPException(status_code=404, detail="Site not found")
+        if not can_manage_site(user, site):
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        owner_id = str(site.get("user_id") or "")
+        if owner_id:
+            await enforce_quota(mongodb, owner_id, "messages")
+        tenant_llm = await tenant_llm_for_site(mongodb, site)
+        rag_engine = RAGEngine(llm_service=tenant_llm) if tenant_llm else get_rag_engine()
+        response = await rag_engine.chat(
+            message=body.message,
+            session_id=body.session_id,
+            user_id=body.user_id,
+            site_id=body.site_id,
+        )
+        if owner_id:
+            await increment_usage(mongodb, owner_id, "messages")
+            await record_model_usage(mongodb, owner_id, tenant_llm)
+        return response
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Preview chat error: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.post("/stream")

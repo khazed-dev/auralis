@@ -168,11 +168,13 @@ class RAGEngine:
         # Get site URL filter and name if site_id provided
         site_url_filter = None
         site_name = None
+        site_behavior = {}
         if site_id:
             site = await mongodb.db.sites.find_one({"site_id": site_id})
             if site:
                 site_url_filter = site.get("url", "").rstrip("/")
                 site_name = site.get("name") or site_url_filter.replace("https://", "").replace("http://", "")
+                site_behavior = (site.get("config") or {}).get("behavior") or {}
                 logger.info(f"Filtering by site: {site_url_filter}")
         
         try:
@@ -245,8 +247,11 @@ class RAGEngine:
                 context=context,
                 history=history,
                 user_id=user_id,
-                site_name=site_name
+                site_name=site_name,
+                behavior=site_behavior,
             )
+            if site_behavior.get("show_sources") is False:
+                sources = []
             
             # 8. Follow-up suggestions are disabled to avoid an extra LLM call.
             follow_ups = []
@@ -293,11 +298,13 @@ class RAGEngine:
 
         site_url_filter = None
         site_name = None
+        site_behavior = {}
         if site_id:
             site = await mongodb.db.sites.find_one({"site_id": site_id})
             if site:
                 site_url_filter = site.get("url", "").rstrip("/")
                 site_name = site.get("name") or site_url_filter.replace("https://", "").replace("http://", "")
+                site_behavior = (site.get("config") or {}).get("behavior") or {}
 
         try:
             history = await mongodb.get_conversation_history(session_id, site_id=site_id)
@@ -311,14 +318,17 @@ class RAGEngine:
             context, sources = self._build_context(relevant_docs)
 
             prompt = self._build_prompt(message, context, history)
-            system_prompt = self._get_system_prompt(site_name)
+            system_prompt = self._get_system_prompt(
+                site_name,
+                site_behavior.get("system_prompt"),
+            )
 
             full_response = ""
             async for chunk in self.llm.generate_stream(
                 prompt,
                 system_prompt,
-                temperature=settings.LLM_TEMPERATURE,
-                max_tokens=settings.LLM_MAX_TOKENS,
+                temperature=float(site_behavior.get("temperature", settings.LLM_TEMPERATURE)),
+                max_tokens=int(site_behavior.get("max_tokens", settings.LLM_MAX_TOKENS)),
             ):
                 full_response += chunk
 
@@ -509,18 +519,27 @@ Rewritten search query (just the query, no explanation):"""
             return min(1.0, semantic + keyword_bonus)
         return max(0, min(1, 1 - score / 2))
     
-    def _get_system_prompt(self, site_name: str = None) -> str:
-        """Get the system prompt for the chatbot (kept compact for lower latency)."""
+    def _get_system_prompt(
+        self,
+        site_name: str = None,
+        custom_prompt: str = None,
+    ) -> str:
+        """Build a multi-industry prompt, optionally led by site-specific behavior."""
         site_desc = site_name if site_name else "website này"
-        return (
-            f"Bạn là chatbot tư vấn bán hàng của {site_desc}. "
-            "Yêu cầu đầu ra bắt buộc: chỉ hiển thị câu trả lời cuối cùng bằng tiếng Việt. "
-            "Không hiển thị suy luận nội bộ, phân tích trung gian, chain-of-thought hoặc nội dung trong thẻ <think>. "
-            "Nếu người dùng hỏi bằng tiếng Anh hoặc ngôn ngữ khác, vẫn trả lời bằng tiếng Việt, trừ khi người dùng yêu cầu dịch nguyên văn. "
-            "Trả lời ngắn gọn, rõ ràng, lịch sự, phù hợp với chatbot tư vấn bán hàng. "
-            "Không dùng các cụm như 'dựa trên ngữ cảnh', 'theo thông tin được cung cấp' hoặc 'cơ sở tri thức'. "
-            "Nếu chưa có đủ thông tin, hãy nói chưa có đủ thông tin và đề nghị khách để lại số điện thoại/Zalo để nhân viên tư vấn."
+        role = (custom_prompt or "").strip() or (
+            f"Bạn là trợ lý AI của {site_desc}. Hãy hỗ trợ người dùng dựa trên "
+            "dữ liệu của website, với giọng điệu rõ ràng, lịch sự và phù hợp "
+            "với lĩnh vực của tổ chức."
         )
+        guardrails = (
+            "Chỉ hiển thị câu trả lời cuối cùng, không hiển thị suy luận nội bộ, "
+            "phân tích trung gian, chain-of-thought hoặc nội dung trong thẻ <think>. "
+            "Không bịa thông tin ngoài dữ liệu tham khảo. "
+            "Không dùng các cụm như 'dựa trên ngữ cảnh', 'theo thông tin được cung cấp' "
+            "hoặc 'cơ sở tri thức'. Nếu chưa đủ dữ liệu, hãy nói rõ chưa đủ thông tin "
+            "và hướng dẫn người dùng liên hệ kênh hỗ trợ phù hợp của website."
+        )
+        return f"{role}\n\nNguyên tắc bắt buộc:\n{guardrails}"
     
     def _build_prompt(
         self,
@@ -550,9 +569,9 @@ Rewritten search query (just the query, no explanation):"""
 - Chỉ hiển thị câu trả lời cuối cùng bằng tiếng Việt.
 - Không hiển thị suy luận nội bộ, phân tích trung gian, chain-of-thought hoặc nội dung trong thẻ <think>.
 - Nếu khách hỏi bằng tiếng Anh hoặc ngôn ngữ khác, vẫn trả lời bằng tiếng Việt, trừ khi khách yêu cầu dịch nguyên văn.
-- Trả lời tự nhiên, ngắn gọn, lịch sự và phù hợp với khách hàng đang cần tư vấn sản phẩm.
+- Trả lời tự nhiên, rõ ràng, lịch sự và phù hợp với mục đích của website.
 - Không nhắc các cụm như "ngữ cảnh", "thông tin được cung cấp" hoặc "cơ sở tri thức".
-- Nếu dữ liệu chưa đủ để trả lời chắc chắn, hãy nói chưa có đủ thông tin và đề nghị khách để lại số điện thoại/Zalo để nhân viên tư vấn.
+- Nếu dữ liệu chưa đủ để trả lời chắc chắn, hãy nói chưa có đủ thông tin và hướng dẫn khách liên hệ kênh hỗ trợ phù hợp.
 - Chỉ trả lời nội dung cần thiết cho khách, không giải thích cách bạn suy luận."""
         
         return prompt
@@ -563,11 +582,16 @@ Rewritten search query (just the query, no explanation):"""
         context: str,
         history: List[Dict],
         user_id: str = None,
-        site_name: str = None
+        site_name: str = None,
+        behavior: Optional[Dict] = None,
     ) -> str:
         """Generate the response using the LLM."""
+        behavior = behavior or {}
         prompt = self._build_prompt(question, context, history)
-        system_prompt = self._get_system_prompt(site_name)
+        system_prompt = self._get_system_prompt(
+            site_name,
+            behavior.get("system_prompt"),
+        )
         
         # Add user-specific context if available
         if user_id:
@@ -579,8 +603,8 @@ Rewritten search query (just the query, no explanation):"""
         response = await self.llm.generate(
             prompt,
             system_prompt,
-            temperature=settings.LLM_TEMPERATURE,
-            max_tokens=settings.LLM_MAX_TOKENS,
+            temperature=float(behavior.get("temperature", settings.LLM_TEMPERATURE)),
+            max_tokens=int(behavior.get("max_tokens", settings.LLM_MAX_TOKENS)),
         )
         return clean_model_output(response)
     

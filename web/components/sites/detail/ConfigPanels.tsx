@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { AppearanceConfig, BehaviorConfig } from "./types";
+import { ChatbotLivePreview } from "./ChatbotLivePreview";
 
 type SaveResult = { ok: boolean; message: string };
 
@@ -9,35 +10,38 @@ export function AppearancePanel({
   config,
   onSave,
   onReset,
+  siteId,
+  siteUrl,
+  quickPrompts,
 }: {
   config: AppearanceConfig;
   onSave: (config: AppearanceConfig) => Promise<SaveResult>;
   onReset: () => Promise<void>;
+  siteId: string;
+  siteUrl: string;
+  quickPrompts: import("./types").SiteConfig["quick_prompts"];
 }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [draft, setDraft] = useState(config);
+
+  function update<K extends keyof AppearanceConfig>(
+    key: K,
+    value: AppearanceConfig[K],
+  ) {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
-    const data = new FormData(event.currentTarget);
-    const result = await onSave({
-      primary_color: String(data.get("primary_color")),
-      chat_title: String(data.get("chat_title")),
-      welcome_message: String(data.get("welcome_message")),
-      bot_avatar_url: String(data.get("bot_avatar_url") || "") || null,
-      position: String(data.get("position")),
-      hide_branding: data.get("hide_branding") === "on",
-      custom_branding_text:
-        String(data.get("custom_branding_text") || "") || null,
-      custom_branding_url:
-        String(data.get("custom_branding_url") || "") || null,
-    });
+    const result = await onSave(draft);
     setMessage(result.message);
     setSaving(false);
   }
 
   return (
+    <div className="appearance-live-layout">
     <form className="site-config-form" onSubmit={submit}>
       <header>
         <h2>Giao diện chatbot</h2>
@@ -48,7 +52,7 @@ export function AppearancePanel({
         <div className="site-config-grid">
           <label>
             Tiêu đề chatbot
-            <input name="chat_title" defaultValue={config.chat_title} required />
+            <input name="chat_title" value={draft.chat_title} onChange={(event) => update("chat_title", event.target.value)} required />
           </label>
           <label>
             Màu thương hiệu
@@ -56,23 +60,25 @@ export function AppearancePanel({
               <input
                 name="primary_color"
                 type="color"
-                defaultValue={config.primary_color}
+                value={draft.primary_color}
+                onChange={(event) => update("primary_color", event.target.value)}
               />
-              <code>{config.primary_color}</code>
+              <code>{draft.primary_color}</code>
             </span>
           </label>
           <label className="wide">
             Lời chào
             <textarea
               name="welcome_message"
-              defaultValue={config.welcome_message}
+              value={draft.welcome_message}
+              onChange={(event) => update("welcome_message", event.target.value)}
               rows={3}
               required
             />
           </label>
           <label>
             Vị trí
-            <select name="position" defaultValue={config.position}>
+            <select name="position" value={draft.position} onChange={(event) => update("position", event.target.value)}>
               <option value="bottom-right">Góc dưới bên phải</option>
               <option value="bottom-left">Góc dưới bên trái</option>
             </select>
@@ -82,7 +88,8 @@ export function AppearancePanel({
             <input
               name="bot_avatar_url"
               type="url"
-              defaultValue={config.bot_avatar_url || ""}
+              value={draft.bot_avatar_url || ""}
+              onChange={(event) => update("bot_avatar_url", event.target.value || null)}
               placeholder="https://..."
             />
           </label>
@@ -94,7 +101,8 @@ export function AppearancePanel({
           <input
             name="hide_branding"
             type="checkbox"
-            defaultChecked={config.hide_branding}
+            checked={draft.hide_branding}
+            onChange={(event) => update("hide_branding", event.target.checked)}
           />
           <span>Tùy chỉnh hoặc ẩn dòng “Powered by Auralis”</span>
         </label>
@@ -103,7 +111,8 @@ export function AppearancePanel({
             Nội dung thương hiệu
             <input
               name="custom_branding_text"
-              defaultValue={config.custom_branding_text || ""}
+              value={draft.custom_branding_text || ""}
+              onChange={(event) => update("custom_branding_text", event.target.value || null)}
               placeholder="Powered by Công ty bạn"
             />
           </label>
@@ -112,7 +121,8 @@ export function AppearancePanel({
             <input
               name="custom_branding_url"
               type="url"
-              defaultValue={config.custom_branding_url || ""}
+              value={draft.custom_branding_url || ""}
+              onChange={(event) => update("custom_branding_url", event.target.value || null)}
               placeholder="https://..."
             />
           </label>
@@ -128,6 +138,13 @@ export function AppearancePanel({
         </button>
       </footer>
     </form>
+    <ChatbotLivePreview
+      siteId={siteId}
+      siteUrl={siteUrl}
+      appearance={draft}
+      quickPrompts={quickPrompts}
+    />
+    </div>
   );
 }
 

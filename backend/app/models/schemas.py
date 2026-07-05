@@ -137,7 +137,11 @@ class SiteAppearanceConfig(BaseModel):
 class SiteBehaviorConfig(BaseModel):
     """Behavior configuration for the chatbot."""
     system_prompt: str = Field(
-        default="You are a helpful assistant. Answer questions based on the provided context.",
+        default=(
+            "Bạn là trợ lý AI của website. Hãy hỗ trợ người dùng dựa trên dữ liệu "
+            "của website, với giọng điệu rõ ràng, lịch sự và phù hợp với lĩnh vực "
+            "của tổ chức."
+        ),
         description="System prompt for the AI"
     )
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="AI temperature (0-2)")
