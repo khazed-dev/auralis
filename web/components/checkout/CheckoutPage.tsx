@@ -164,9 +164,19 @@ function PaymentWaiting({ order }: { order: Order }) {
 
 function CheckoutSuccess({ result, planName }: { result: Order; planName: string }) {
   const isUpgrade = result.order_type === "subscription_change";
+  const [copied, setCopied] = useState(false);
+  async function copyPassword() {
+    if (!result.password) return;
+    await navigator.clipboard.writeText(result.password);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  }
+  const dashboardHref = isUpgrade
+    ? "/dashboard/subscription"
+    : `/login?email=${encodeURIComponent(result.email)}`;
   return <div className="checkout-success-page"><div className="success-glow one" /><div className="success-glow two" /><main className="success-card">
     <div className="success-check">✓</div><h1>{isUpgrade ? "Nâng cấp thành công!" : "Đăng ký thành công!"}</h1><p>{isUpgrade ? <>Gói dịch vụ của bạn đã được nâng cấp lên <strong>{planName}</strong>.</> : <>Chào mừng bạn đến với gói <strong>{planName}</strong> của Auralis. {result.trial_ends_at ? `Tài khoản dùng thử đã sẵn sàng đến ${new Date(result.trial_ends_at).toLocaleDateString("vi-VN")}.` : "Tài khoản của bạn đã sẵn sàng để sử dụng."}</>}</p>
-    <section><small>CHI TIẾT ĐƠN HÀNG</small><span>Mã đơn hàng <b>#{result.order_id}</b></span><span>Phương thức <b>VietQR</b></span><span>Tài khoản <b>{result.email}</b></span>{result.password && <span>Mật khẩu <b>{result.password}</b></span>}<span className="success-total">Tổng thanh toán <b>{money(result.total)}</b></span></section>
-    <div className="success-actions"><Link href={isUpgrade ? "/dashboard/subscription" : "/login"}>Đi đến Dashboard　→</Link><button type="button" onClick={() => window.print()}>▧　Xem hóa đơn</button></div><small>Bạn có thắc mắc? <a href="mailto:support@auralis.ai">Liên hệ bộ phận hỗ trợ</a></small>
+    <section><small>CHI TIẾT ĐƠN HÀNG</small><span>Mã đơn hàng <b>#{result.order_id}</b></span><span>Phương thức <b>VietQR</b></span><span>Tài khoản <b>{result.email}</b></span>{result.password && <span>Mật khẩu <span className="success-password"><b>{result.password}</b><button type="button" onClick={copyPassword} aria-label="Sao chép mật khẩu" title="Sao chép mật khẩu">{copied ? "✓" : "⧉"}</button></span></span>}<span className="success-total">Tổng thanh toán <b>{money(result.total)}</b></span></section>
+    <div className="success-actions"><Link href={dashboardHref}>Đi đến Dashboard　→</Link><button type="button" onClick={() => window.print()}>▧　Xem hóa đơn</button></div><small>Bạn có thắc mắc? <a href="mailto:support@auralis.ai">Liên hệ bộ phận hỗ trợ</a></small>
   </main></div>;
 }

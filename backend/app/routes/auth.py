@@ -17,7 +17,7 @@ from app.services.auth import (
 
 limiter = Limiter(key_func=get_client_ip)
 
-# Admins with must_change_password may only reach GET/PATCH /api/auth/me until they set a new password.
+# Accounts with must_change_password may only reach GET/PATCH /api/auth/me until they set a new password.
 _ADMIN_PASSWORD_RESET_PATH = "/api/auth/me"
 
 
@@ -94,7 +94,7 @@ async def require_auth(
     if int(user.get("token_version") or 0) != token_data.token_version:
         raise HTTPException(status_code=401, detail="Session has been revoked")
 
-    if user.get("role") in {UserRole.ADMIN.value, UserRole.PLATFORM_ADMIN.value} and user.get("must_change_password"):
+    if user.get("must_change_password"):
         path = request.url.path.rstrip("/") or "/"
         allowed = path == _ADMIN_PASSWORD_RESET_PATH and request.method in ("GET", "PATCH")
         if not allowed:

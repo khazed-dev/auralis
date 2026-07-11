@@ -198,6 +198,15 @@ class Settings(BaseSettings):
     PAYMENT_CREDENTIAL_ENCRYPTION_KEY: str = ""
     PAYMENT_ORDER_EXPIRE_MINUTES: int = 30
     PAYMENT_RETURN_BASE_URL: str = ""
+
+    # Transactional email (SMTP)
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_FROM_NAME: str = "Auralis"
+    SMTP_USE_TLS: bool = True
     
     # Password policy
     MIN_PASSWORD_LENGTH: int = 8

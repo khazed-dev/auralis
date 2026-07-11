@@ -12,6 +12,7 @@ from fastapi import HTTPException
 
 from app.config import settings
 from app.services.auth import AuthService, UserCreate, UserRole
+from app.services.transactional_email import send_checkout_invoice_email
 
 
 def utcnow() -> datetime:
@@ -111,6 +112,7 @@ async def provision_checkout_order(db, order: dict) -> dict:
         raise HTTPException(status_code=500, detail="Không thể tải tài khoản vừa tạo")
 
     owner_id = str(persisted["_id"])
+    await db.update_user(owner_id, {"must_change_password": True, "updated_at": utcnow()})
     now = utcnow()
     snapshot = order.get("plan_snapshot") or {}
     trial_days = int(snapshot.get("trial_days") or 0)
@@ -154,7 +156,24 @@ async def provision_checkout_order(db, order: dict) -> dict:
             if order.get("promo_reserved"):
                 increments["reservations"] = -1
             await db.db.promo_codes.update_one({"_id": promo_id}, {"$inc": increments})
-        return {**order, **updates}
+        completed_order = {**order, **updates}
+        try:
+            sent = await send_checkout_invoice_email(completed_order, password)
+            await db.db.checkout_orders.update_one(
+                {"_id": order["_id"]},
+                {"$set": {
+                    "invoice_email_status": "sent" if sent else "disabled",
+                    "invoice_email_sent_at": utcnow() if sent else None,
+                }},
+            )
+        except Exception as exc:
+            from loguru import logger
+            logger.exception(f"Failed to send checkout invoice {order['order_id']}: {exc}")
+            await db.db.checkout_orders.update_one(
+                {"_id": order["_id"]},
+                {"$set": {"invoice_email_status": "failed", "invoice_email_error": str(exc)[:500]}},
+            )
+        return completed_order
     except Exception:
         await db.db.users.delete_one({"_id": persisted["_id"]})
         raise

@@ -6658,6 +6658,19 @@ pre,
 .platform-checks label { align-items: center; display: flex; font-size: 13px; gap: 7px; }
 .platform-modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 7px; }
 .platform-modal-actions button { background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; cursor: pointer; padding: 11px 16px; }
+
+.success-password { align-items: center; display: inline-flex; gap: 7px; }
+.success-password button { align-items: center; background: transparent; border: 0; color: inherit; cursor: pointer; display: inline-flex; font-size: 18px; justify-content: center; padding: 1px 3px; }
+.required-password-layer { align-items: center; display: flex; inset: 0; justify-content: center; padding: 20px; position: fixed; z-index: 1000; }
+.required-password-backdrop { background: rgba(7, 22, 77, .66); inset: 0; position: absolute; }
+.required-password-modal { background: #fff; border-radius: 16px; box-shadow: 0 24px 80px rgba(0,0,0,.25); display: grid; gap: 16px; max-width: 460px; padding: 30px; position: relative; width: 100%; z-index: 1; }
+.required-password-modal h2, .required-password-modal p { margin: 0; }
+.required-password-modal > p { color: #64748b; line-height: 1.55; }
+.required-password-modal label { display: grid; font-weight: 650; gap: 7px; }
+.required-password-modal input { border: 1px solid #cbd5e1; border-radius: 9px; font: inherit; padding: 12px; }
+.required-password-modal button { background: #10256f; border: 0; border-radius: 9px; color: #fff; cursor: pointer; font: inherit; font-weight: 700; padding: 13px; }
+.required-password-modal button:disabled { cursor: wait; opacity: .65; }
+.required-password-modal .required-password-error { color: #dc2626; min-height: 20px; }
 .platform-detail-grid { display: grid; gap: 12px; grid-template-columns: repeat(4, 1fr); }
 .platform-detail-grid article { background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 8px; padding: 15px; }
 .platform-detail-grid span { color: var(--muted-text); font-size: 11px; }

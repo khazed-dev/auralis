@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ReactNode, useEffect, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useState } from "react";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { BrandLogo } from "@/components/ui/BrandLogo";
-import { DashboardUser, getCurrentUser, logout } from "@/lib/auth";
+import { API_BASE, authFetch, DashboardUser, getCurrentUser, logout } from "@/lib/auth";
 
 const primaryNav: Array<{
   label: string;
@@ -130,6 +130,36 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     router.replace("/login");
   }
 
+  async function changeRequiredPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const password = String(data.get("new_password") ?? "");
+    const confirmation = String(data.get("confirm_password") ?? "");
+    const error = form.querySelector<HTMLElement>("[data-password-error]");
+    if (password !== confirmation) {
+      if (error) error.textContent = "Mật khẩu xác nhận không khớp.";
+      return;
+    }
+    const button = form.querySelector<HTMLButtonElement>("button[type=submit]");
+    if (button) button.disabled = true;
+    if (error) error.textContent = "";
+    const response = await authFetch(`${API_BASE}/auth/me`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ new_password: password }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (error) error.textContent = typeof body.detail === "string" ? body.detail : "Không thể đổi mật khẩu.";
+      if (button) button.disabled = false;
+      return;
+    }
+    const updated = body as DashboardUser;
+    localStorage.setItem("user", JSON.stringify(updated));
+    setUser(updated);
+  }
+
   if (loading && !user) {
     return (
       <div className="dashboard-loading">
@@ -230,6 +260,19 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         </header>
         {children}
       </div>
+      {user?.must_change_password && (
+        <div className="required-password-layer" role="dialog" aria-modal="true" aria-labelledby="required-password-title">
+          <div className="required-password-backdrop" />
+          <form className="required-password-modal" onSubmit={changeRequiredPassword}>
+            <h2 id="required-password-title">Đổi mật khẩu lần đầu</h2>
+            <p>Để bảo vệ tài khoản, bạn cần đặt mật khẩu mới trước khi sử dụng Dashboard.</p>
+            <label>Mật khẩu mới<input name="new_password" type="password" minLength={8} autoComplete="new-password" required autoFocus /></label>
+            <label>Xác nhận mật khẩu<input name="confirm_password" type="password" minLength={8} autoComplete="new-password" required /></label>
+            <p className="required-password-error" data-password-error role="alert" />
+            <button type="submit">Đổi mật khẩu và tiếp tục</button>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

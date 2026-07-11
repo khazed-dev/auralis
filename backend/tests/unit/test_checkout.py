@@ -9,6 +9,7 @@ from app.services.auth import AuthService, UserCreate
 from app.services.payments import (
     SEPAY_SIGNED_FIELDS, build_sepay_checkout, encrypt_credential, public_order,
 )
+from app.services.transactional_email import _build_invoice_html
 from app.config import settings
 
 
@@ -65,4 +66,17 @@ def test_completed_order_accepts_naive_mongodb_credential_expiry(monkeypatch):
     }, include_credentials=True)
 
     assert result["password"] == "Au!7password"
+
+
+def test_checkout_invoice_contains_order_and_credentials(monkeypatch):
+    monkeypatch.setattr(settings, "PAYMENT_RETURN_BASE_URL", "https://auralis.example")
+    content = _build_invoice_html({
+        "order_id": "AUR12345678", "plan": "growth", "email": "paid@example.com",
+        "subtotal": 2_400_000, "discount": 0, "vat": 240_000, "total": 2_640_000,
+    }, "Au!7temporary")
+
+    assert "AUR12345678" in content
+    assert "paid@example.com" in content
+    assert "Au!7temporary" in content
+    assert "2.640.000 VNĐ" in content
 
