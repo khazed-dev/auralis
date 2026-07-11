@@ -67,6 +67,50 @@ def minimal_html():
     """
 
 
+class _MockStreamContent:
+    """Minimal aiohttp StreamReader test double."""
+
+    def __init__(self, body: str):
+        self.body = body.encode("utf-8")
+
+    async def iter_chunked(self, size: int):
+        for offset in range(0, len(self.body), size):
+            yield self.body[offset:offset + size]
+
+
+class _MockResponse:
+    """ClientResponse test double matching the APIs used by the crawler."""
+
+    def __init__(
+        self,
+        *,
+        status: int = 200,
+        body: str = "",
+        content_type: str = "text/html; charset=utf-8",
+    ):
+        self.status = status
+        self.headers = {"content-type": content_type}
+        self.charset = "utf-8"
+        self.content = _MockStreamContent(body)
+        self.released = False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    def release(self):
+        self.released = True
+
+
+def _mock_http_session(**response_kwargs):
+    response = _MockResponse(**response_kwargs)
+    session = MagicMock()
+    session.get = AsyncMock(return_value=response)
+    return session, response
+
+
 # ==================== _should_crawl Tests ====================
 
 class TestShouldCrawl:
@@ -296,6 +340,14 @@ class TestExtractLinks:
 class TestFetchPage:
     """Tests for page fetching functionality."""
 
+    @pytest.fixture(autouse=True)
+    def allow_public_test_urls(self):
+        with patch(
+            "app.services.crawler.validate_public_http_url",
+            AsyncMock(return_value=(True, None)),
+        ):
+            yield
+
     @pytest.mark.asyncio
     async def test_fetch_page_reads_all_streamed_chunks(self, crawler):
         """Content after the first network chunk must not be discarded."""
@@ -324,11 +376,7 @@ class TestFetchPage:
             async def get(self, _url, allow_redirects=False):
                 return Response()
 
-        with patch(
-            "app.services.crawler.validate_public_http_url",
-            AsyncMock(return_value=(True, None)),
-        ):
-            result = await crawler._fetch_page(Session(), "https://example.com/page")
+        result = await crawler._fetch_page(Session(), "https://example.com/page")
 
         assert result is not None
         assert "later chunk" in result["content"]
@@ -337,13 +385,7 @@ class TestFetchPage:
     @pytest.mark.asyncio
     async def test_fetch_page_success(self, crawler, sample_html):
         """Should successfully fetch and parse a page."""
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.headers = {"content-type": "text/html; charset=utf-8"}
-        mock_response.text = AsyncMock(return_value=sample_html)
-        
-        mock_session = MagicMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_response)))
+        mock_session, _ = _mock_http_session(body=sample_html)
         
         result = await crawler._fetch_page(mock_session, "https://example.com/page")
         
@@ -355,11 +397,7 @@ class TestFetchPage:
     @pytest.mark.asyncio
     async def test_fetch_page_403_forbidden(self, crawler):
         """Should handle 403 forbidden responses."""
-        mock_response = AsyncMock()
-        mock_response.status = 403
-        
-        mock_session = MagicMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_response)))
+        mock_session, _ = _mock_http_session(status=403)
         
         result = await crawler._fetch_page(mock_session, "https://example.com/blocked")
         
@@ -369,11 +407,7 @@ class TestFetchPage:
     @pytest.mark.asyncio
     async def test_fetch_page_429_rate_limited(self, crawler):
         """Should handle 429 rate limit responses."""
-        mock_response = AsyncMock()
-        mock_response.status = 429
-        
-        mock_session = MagicMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_response)))
+        mock_session, _ = _mock_http_session(status=429)
         
         result = await crawler._fetch_page(mock_session, "https://example.com/limited")
         
@@ -383,57 +417,39 @@ class TestFetchPage:
     @pytest.mark.asyncio
     async def test_fetch_page_404_not_found(self, crawler):
         """Should handle 404 responses."""
-        mock_response = AsyncMock()
-        mock_response.status = 404
-        
-        mock_session = MagicMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_response)))
+        mock_session, _ = _mock_http_session(status=404)
         
         result = await crawler._fetch_page(mock_session, "https://example.com/missing")
         
         assert result is None
+        assert any("HTTP 404" in err for err in crawler.errors)
     
     @pytest.mark.asyncio
     async def test_fetch_page_non_html_content(self, crawler):
         """Should skip non-HTML content types."""
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.headers = {"content-type": "application/json"}
-        
-        mock_session = MagicMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_response)))
+        mock_session, _ = _mock_http_session(content_type="application/json")
         
         result = await crawler._fetch_page(mock_session, "https://example.com/api/data")
         
         assert result is None
+        assert any("Unsupported content type" in err for err in crawler.errors)
     
     @pytest.mark.asyncio
     async def test_fetch_page_minimal_content(self, crawler, minimal_html):
         """Should skip pages with minimal content."""
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.headers = {"content-type": "text/html"}
-        mock_response.text = AsyncMock(return_value=minimal_html)
-        
-        mock_session = MagicMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_response)))
+        mock_session, _ = _mock_http_session(body=minimal_html)
         
         result = await crawler._fetch_page(mock_session, "https://example.com/empty")
         
         assert result is None
+        assert any("too little text" in err for err in crawler.errors)
     
     @pytest.mark.asyncio
     async def test_fetch_page_extracts_title_from_h1(self, crawler):
         """Should extract title from h1 if title tag missing."""
         html = '<html><body><h1>Page Heading</h1><p>' + 'Content. ' * 50 + '</p></body></html>'
         
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.headers = {"content-type": "text/html"}
-        mock_response.text = AsyncMock(return_value=html)
-        
-        mock_session = MagicMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_response)))
+        mock_session, _ = _mock_http_session(body=html)
         
         result = await crawler._fetch_page(mock_session, "https://example.com/page")
         
@@ -443,13 +459,7 @@ class TestFetchPage:
     @pytest.mark.asyncio
     async def test_fetch_page_removes_scripts_and_styles(self, crawler, sample_html):
         """Should remove script and style content from text."""
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.headers = {"content-type": "text/html"}
-        mock_response.text = AsyncMock(return_value=sample_html)
-        
-        mock_session = MagicMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_response)))
+        mock_session, _ = _mock_http_session(body=sample_html)
         
         result = await crawler._fetch_page(mock_session, "https://example.com/page")
         
@@ -460,13 +470,7 @@ class TestFetchPage:
     @pytest.mark.asyncio
     async def test_fetch_page_includes_metadata(self, crawler, sample_html):
         """Should include content metadata."""
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.headers = {"content-type": "text/html"}
-        mock_response.text = AsyncMock(return_value=sample_html)
-        
-        mock_session = MagicMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_response)))
+        mock_session, _ = _mock_http_session(body=sample_html)
         
         result = await crawler._fetch_page(mock_session, "https://example.com/page")
         

@@ -75,6 +75,35 @@ def rag_engine(mock_ollama_service, mock_vector_store_rag):
         return engine
 
 
+# ==================== Q&A Matching Tests ====================
+
+class TestQAMatching:
+    @pytest.mark.asyncio
+    async def test_qa_embeddings_are_batched_and_cached(self, rag_engine):
+        embeddings = MagicMock()
+        embeddings.embed_documents.return_value = [[1.0, 0.0], [0.0, 1.0]]
+        embeddings.embed_query.return_value = [1.0, 0.0]
+        rag_engine.vector_store.embeddings = embeddings
+        mongodb = MagicMock()
+        mongodb.get_qa_for_rag = AsyncMock(
+            return_value=[
+                {"id": "qa-1", "question": "C114", "answer": "Answer 1"},
+                {"id": "qa-2", "question": "HUAVY", "answer": "Answer 2"},
+            ]
+        )
+
+        with patch(
+            "app.services.rag_engine.get_mongodb", AsyncMock(return_value=mongodb)
+        ):
+            first = await rag_engine._check_qa_match("C114", "site-1")
+            second = await rag_engine._check_qa_match("C114", "site-1")
+
+        assert first[0]["id"] == "qa-1"
+        assert second[0]["id"] == "qa-1"
+        embeddings.embed_documents.assert_called_once_with(["C114", "HUAVY"])
+        assert embeddings.embed_query.call_count == 2
+
+
 # ==================== _rewrite_query Tests ====================
 
 class TestRewriteQuery:
@@ -265,6 +294,51 @@ class TestGradeDocuments:
         
         result = await rag_engine._grade_documents("unrelated query", docs)
         
+        assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_grade_documents_rejects_weak_hybrid_keyword_match(self, rag_engine):
+        """One partial lexical hit must not override a poor dense match."""
+        docs = [
+            (
+                Document(
+                    page_content="Smart curtains for the living room",
+                    metadata={
+                        "_retrieval": "hybrid",
+                        "_dense_score": 1.8,
+                        "_keyword_score": 0.4,
+                        "_keyword_match_count": 1,
+                        "_keyword_match_ratio": 0.25,
+                    },
+                ),
+                0.2,
+            )
+        ]
+
+        result = await rag_engine._grade_documents("smart lock C114 price", docs)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_grade_documents_keeps_strong_hybrid_keyword_match(self, rag_engine):
+        docs = [
+            (
+                Document(
+                    page_content="Replacement lock model C114",
+                    metadata={
+                        "_retrieval": "hybrid",
+                        "_dense_score": 1.8,
+                        "_keyword_score": 2.0,
+                        "_keyword_match_count": 2,
+                        "_keyword_match_ratio": 0.5,
+                    },
+                ),
+                0.1,
+            )
+        ]
+
+        result = await rag_engine._grade_documents("smart lock C114 price", docs)
+
         assert len(result) == 1
 
 

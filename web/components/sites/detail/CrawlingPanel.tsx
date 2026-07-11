@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { API_BASE, authFetch, DEV_AUTH_ENABLED } from "@/lib/auth";
 import { CrawlHistory } from "./types";
 
@@ -10,6 +10,8 @@ export function CrawlingPanel({ siteId }: { siteId: string }) {
   const [history, setHistory] = useState<CrawlHistory[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const crawlingRef = useRef(false);
+  const notifyOnCompletionRef = useRef(true);
   const [schedule, setSchedule] = useState({
     enabled: false,
     frequency: "weekly",
@@ -40,30 +42,41 @@ export function CrawlingPanel({ siteId }: { siteId: string }) {
       authFetch(`${API_BASE}/sites/${siteId}/crawl-history?limit=10`),
       authFetch(`${API_BASE}/sites/${siteId}/crawl-schedule`),
     ]);
-    if (statusResponse.ok) {
-      const status = (await statusResponse.json()) as {
-        is_crawling: boolean;
-        pages_crawled?: number;
-      };
-      setIsCrawling(status.is_crawling);
-      setPages(status.pages_crawled || 0);
-    }
-    if (historyResponse.ok) {
-      const data = (await historyResponse.json()) as {
-        history: CrawlHistory[];
-      };
-      setHistory(data.history);
-    }
+    let notifyOnCompletion = notifyOnCompletionRef.current;
     if (scheduleResponse.ok) {
       const data = (await scheduleResponse.json()) as {
         schedule: typeof schedule;
       };
+      notifyOnCompletion = data.schedule.notify_on_completion !== false;
+      notifyOnCompletionRef.current = notifyOnCompletion;
       setSchedule({
         ...data.schedule,
         custom_cron: data.schedule.custom_cron || "",
         include_patterns: data.schedule.include_patterns || [],
         exclude_patterns: data.schedule.exclude_patterns || [],
       });
+    }
+    if (statusResponse.ok) {
+      const status = (await statusResponse.json()) as {
+        is_crawling: boolean;
+        pages_crawled?: number;
+      };
+      const justFinished = crawlingRef.current && !status.is_crawling;
+      crawlingRef.current = status.is_crawling;
+      setIsCrawling(status.is_crawling);
+      setPages(status.pages_crawled || 0);
+      if (justFinished && notifyOnCompletion) {
+        setMessage("Crawl đã hoàn tất. Dữ liệu mới đã sẵn sàng.");
+        if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+          new Notification("Auralis AI", { body: "Crawl website đã hoàn tất." });
+        }
+      }
+    }
+    if (historyResponse.ok) {
+      const data = (await historyResponse.json()) as {
+        history: CrawlHistory[];
+      };
+      setHistory(data.history);
     }
   }, [siteId]);
 
@@ -121,6 +134,13 @@ export function CrawlingPanel({ siteId }: { siteId: string }) {
       exclude_patterns: String(form.get("exclude_patterns") || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
       notify_on_completion: form.get("notify_on_completion") === "on",
     };
+    if (
+      next.notify_on_completion &&
+      typeof Notification !== "undefined" &&
+      Notification.permission === "default"
+    ) {
+      await Notification.requestPermission();
+    }
     if (!DEV_AUTH_ENABLED) {
       const response = await authFetch(`${API_BASE}/sites/${siteId}/crawl-schedule`, {
         method: "PUT",
@@ -134,6 +154,7 @@ export function CrawlingPanel({ siteId }: { siteId: string }) {
       }
     }
     setSchedule({ ...next, custom_cron: next.custom_cron || "" });
+    notifyOnCompletionRef.current = next.notify_on_completion;
     setMessage("Đã lưu lịch crawl.");
   }
 
@@ -184,7 +205,7 @@ export function CrawlingPanel({ siteId }: { siteId: string }) {
             <label>URL cần bao gồm<small>Mỗi dòng một pattern.</small><textarea name="include_patterns" rows={4} defaultValue={schedule.include_patterns.join("\n")} placeholder="/blog/*" /></label>
             <label>URL cần loại trừ<small>Mỗi dòng một pattern.</small><textarea name="exclude_patterns" rows={4} defaultValue={schedule.exclude_patterns.join("\n")} placeholder="/admin/*" /></label>
           </div>
-          <label className="site-config-checkbox"><input name="notify_on_completion" type="checkbox" defaultChecked={schedule.notify_on_completion} /><span>Thông báo khi crawl hoàn tất</span></label>
+          <label className="site-config-checkbox"><input name="notify_on_completion" type="checkbox" defaultChecked={schedule.notify_on_completion} /><span>Hiển thị thông báo trình duyệt khi crawl hoàn tất</span></label>
           <button className="sites-primary-button">Lưu lịch crawl</button>
         </section>
       </form>

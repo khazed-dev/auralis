@@ -100,8 +100,8 @@ export function LoginForm() {
 
       {DEV_AUTH_ENABLED && (
         <div className="login-dev-hint">
-          <strong>Chế độ kiểm thử local</strong>
-          <span>Dùng tài khoản debug trong web/.env.local</span>
+          <strong>Chế độ demo local</strong>
+          <span>Dữ liệu trong Dashboard sẽ không được lưu.</span>
         </div>
       )}
 

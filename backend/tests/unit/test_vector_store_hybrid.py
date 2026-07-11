@@ -58,3 +58,48 @@ def test_hybrid_search_filters_site_before_final_top_k():
     )
 
     assert [doc.metadata["site_id"] for doc, _ in results] == ["target"]
+
+
+def test_hybrid_search_does_not_mutate_persisted_documents():
+    document = Document(
+        page_content="Lock model C114 supports fingerprints.",
+        metadata={"url": "https://example.vn/c114", "title": "C114", "chunk_index": 0},
+    )
+    store = _store_with([document], [(document, 0.3)])
+
+    results = store.hybrid_search_with_score("what is C114", k=1)
+
+    assert results[0][0] is not document
+    assert results[0][0].metadata["_retrieval"] == "hybrid"
+    assert all(not key.startswith("_retrieval") for key in document.metadata)
+    assert "_dense_score" not in document.metadata
+
+
+def test_filtered_dense_search_fetches_candidates_before_top_k():
+    other = Document(page_content="C114", metadata={"site_id": "other"})
+    target = Document(page_content="C114 target", metadata={"site_id": "target"})
+    store = _store_with([other, target], [(other, 0.1), (target, 0.2)])
+
+    results = store.similarity_search_with_score(
+        "C114", k=1, filter={"site_id": "target"}
+    )
+
+    assert results == [(target, 0.2)]
+
+
+def test_lexical_metadata_measures_informative_query_coverage():
+    generic = Document(
+        page_content="What is this product?",
+        metadata={"url": "https://example.vn/generic", "chunk_index": 0},
+    )
+    exact = Document(
+        page_content="C114 supports fingerprints.",
+        metadata={"url": "https://example.vn/c114", "chunk_index": 0},
+    )
+    store = _store_with([generic, exact], [(generic, 0.1), (exact, 0.4)])
+
+    results = store.hybrid_search_with_score("what is product C114", k=2)
+    by_url = {doc.metadata["url"]: doc for doc, _ in results}
+
+    assert by_url["https://example.vn/c114"].metadata["_keyword_match_ratio"] == 1.0
+    assert by_url["https://example.vn/generic"].metadata["_keyword_score"] == 0.0

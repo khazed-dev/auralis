@@ -1,10 +1,10 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { BrandLogo } from "@/components/ui/BrandLogo";
 import { DashboardUser, getCurrentUser, logout } from "@/lib/auth";
 
 const primaryNav: Array<{
@@ -155,7 +155,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       <aside className={`dashboard-sidebar ${mobileOpen ? "is-open" : ""}`}>
         <div className="dashboard-brand">
           <Link href={user?.role === "platform_admin" ? "/dashboard/admin/subscriptions" : "/dashboard/sites"} aria-label="Auralis">
-            <Image src="/logo-auralis.png" alt="Auralis" width={140} height={48} priority />
+            <BrandLogo priority />
           </Link>
           <button
             className="sidebar-collapse"
@@ -225,7 +225,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           <button type="button" onClick={() => setMobileOpen(true)} aria-label="Mở menu">
             <Icon name="menu" />
           </button>
-          <Image src="/logo-auralis.png" alt="Auralis" width={112} height={38} />
+          <BrandLogo />
           <span className="dashboard-avatar">{initial}</span>
         </header>
         {children}

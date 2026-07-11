@@ -1,6 +1,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import { LoginForm } from "@/components/auth/LoginForm";
+import { BrandLogo } from "@/components/ui/BrandLogo";
+import { LoginBrandCopy, PlatformFooter } from "@/components/ui/PlatformBranding";
 
 export const metadata = {
   title: "Đăng nhập — Auralis AI",
@@ -16,13 +18,10 @@ export default function LoginPage() {
       <section className="login-shell">
         <div className="login-panel">
           <Link className="login-mobile-logo" href="/" aria-label="Về trang chủ Auralis">
-            <Image src="/logo-auralis.png" alt="Auralis" width={150} height={52} priority />
+            <BrandLogo priority />
           </Link>
 
-          <div className="login-heading">
-            <h1>Chào mừng bạn trở lại</h1>
-            <p>Đăng nhập để quản lý các trợ lý AI của bạn</p>
-          </div>
+          <LoginBrandCopy />
 
           <div className="login-divider">
             <span />
@@ -35,6 +34,7 @@ export default function LoginPage() {
           <p className="login-register">
             Chưa có tài khoản? <Link href="/register">Đăng ký</Link>
           </p>
+          <PlatformFooter />
         </div>
 
         <aside className="login-visual" aria-label="Giới thiệu Auralis">

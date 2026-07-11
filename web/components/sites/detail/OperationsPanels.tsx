@@ -172,14 +172,18 @@ export function LeadsPanel({
   }
 
   async function remove(id: string) {
-    if (!DEV_AUTH_ENABLED) await authFetch(`${API_BASE}/leads/${id}`, { method: "DELETE" });
+    if (!DEV_AUTH_ENABLED) {
+      const response = await authFetch(`${API_BASE}/leads/${id}`, { method: "DELETE" });
+      if (!response.ok) { setMessage(await apiError(response, "Không thể xóa lead.")); return; }
+    }
     setLeads(leads.filter((lead) => lead.id !== id));
+    setMessage("Đã xóa lead.");
   }
 
   async function exportCsv() {
     if (DEV_AUTH_ENABLED) { setMessage("Xuất CSV chỉ khả dụng với dữ liệu thật."); return; }
     const response = await authFetch(`${API_BASE}/sites/${siteId}/leads/export`);
-    if (!response.ok) return;
+    if (!response.ok) { setMessage(await apiError(response, "Không thể xuất danh sách lead.")); return; }
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");

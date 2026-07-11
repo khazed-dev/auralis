@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
@@ -63,7 +62,7 @@ export function PlatformShell({ children }: { children: ReactNode }) {
     <aside className={`dashboard-sidebar platform-sidebar ${mobileOpen ? "is-open" : ""}`}>
       <div className="dashboard-brand">
         <Link href="/platform" aria-label="Auralis Platform Admin">
-          <Image src="/logo-auralis.png" alt="Auralis" width={140} height={48} priority />
+          <BrandLogo priority />
         </Link>
         <button
           className="sidebar-collapse"

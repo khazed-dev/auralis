@@ -140,19 +140,27 @@ export function TriggersPanel({ siteId }: { siteId: string }) {
   async function update(trigger: Trigger, updates: Partial<Trigger>) {
     if (!DEV_AUTH_ENABLED) {
       const response = await authFetch(`${API_BASE}/sites/${siteId}/triggers/${trigger.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(updates) });
-      if (!response.ok) return;
+      if (!response.ok) { setMessage(await errorMessage(response, "Không thể cập nhật trigger.")); return; }
     }
     setTriggers(triggers.map((item) => item.id === trigger.id ? { ...item, ...updates } : item));
+    setMessage("Đã cập nhật trigger.");
   }
 
   async function remove(trigger: Trigger) {
     if (!window.confirm(`Xóa trigger “${trigger.name}”?`)) return;
-    if (!DEV_AUTH_ENABLED) await authFetch(`${API_BASE}/sites/${siteId}/triggers/${trigger.id}`, { method: "DELETE" });
+    if (!DEV_AUTH_ENABLED) {
+      const response = await authFetch(`${API_BASE}/sites/${siteId}/triggers/${trigger.id}`, { method: "DELETE" });
+      if (!response.ok) { setMessage(await errorMessage(response, "Không thể xóa trigger.")); return; }
+    }
     setTriggers(triggers.filter((item) => item.id !== trigger.id));
+    setMessage("Đã xóa trigger.");
   }
 
   async function saveCooldown() {
-    if (!DEV_AUTH_ENABLED) await authFetch(`${API_BASE}/sites/${siteId}/triggers/cooldown?cooldown_ms=${cooldown}`, { method: "PUT" });
+    if (!DEV_AUTH_ENABLED) {
+      const response = await authFetch(`${API_BASE}/sites/${siteId}/triggers/cooldown?cooldown_ms=${cooldown}`, { method: "PUT" });
+      if (!response.ok) { setMessage(await errorMessage(response, "Không thể lưu thời gian chờ.")); return; }
+    }
     setMessage("Đã lưu thời gian chờ.");
   }
 
@@ -242,18 +250,33 @@ export function TrainingPanel({ siteId }: { siteId: string }) {
   }
 
   async function removeDoc(id: string) {
-    if (!DEV_AUTH_ENABLED) await authFetch(`${API_BASE}/documents/${siteId}/${id}`, { method: "DELETE" });
+    if (!DEV_AUTH_ENABLED) {
+      const response = await authFetch(`${API_BASE}/documents/${siteId}/${id}`, { method: "DELETE" });
+      if (!response.ok) { setMessage(await errorMessage(response, "Không thể xóa tài liệu.")); return; }
+    }
     setDocuments(documents.filter((item) => item.id !== id));
+    setMessage("Đã xóa tài liệu.");
   }
 
   async function toggleQA(item: QAItem) {
-    if (!DEV_AUTH_ENABLED) await authFetch(`${API_BASE}/sites/${siteId}/qa/${item.id}/toggle`, { method: "POST" });
-    setQaPairs(qaPairs.map((qa) => qa.id === item.id ? { ...qa, enabled: !qa.enabled } : qa));
+    if (!DEV_AUTH_ENABLED) {
+      const response = await authFetch(`${API_BASE}/sites/${siteId}/qa/${item.id}/toggle`, { method: "POST" });
+      if (!response.ok) { setMessage(await errorMessage(response, "Không thể cập nhật Q&A.")); return; }
+      const updated = (await response.json()) as QAItem;
+      setQaPairs(qaPairs.map((qa) => qa.id === item.id ? updated : qa));
+    } else {
+      setQaPairs(qaPairs.map((qa) => qa.id === item.id ? { ...qa, enabled: !qa.enabled } : qa));
+    }
+    setMessage("Đã cập nhật Q&A.");
   }
 
   async function removeQA(id: string) {
-    if (!DEV_AUTH_ENABLED) await authFetch(`${API_BASE}/sites/${siteId}/qa/${id}`, { method: "DELETE" });
+    if (!DEV_AUTH_ENABLED) {
+      const response = await authFetch(`${API_BASE}/sites/${siteId}/qa/${id}`, { method: "DELETE" });
+      if (!response.ok) { setMessage(await errorMessage(response, "Không thể xóa Q&A.")); return; }
+    }
     setQaPairs(qaPairs.filter((item) => item.id !== id));
+    setMessage("Đã xóa Q&A.");
   }
 
   return (

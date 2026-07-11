@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import {
@@ -181,7 +182,9 @@ export function SettingsModule() {
           body: JSON.stringify(next),
         });
         if (!response.ok) throw new Error(await apiError(response, "Không thể lưu thương hiệu."));
-        setBranding((await response.json()) as Branding);
+        const saved = (await response.json()) as Branding;
+        setBranding(saved);
+        window.dispatchEvent(new CustomEvent("platform-branding-updated", { detail: saved }));
       } else {
         setBranding(next);
       }
@@ -207,6 +210,7 @@ export function SettingsModule() {
         return;
       }
       setBranding((await response.json()) as Branding);
+      window.dispatchEvent(new CustomEvent("platform-branding-updated", { detail: defaultBranding }));
     } else {
       setBranding(defaultBranding);
     }
@@ -320,12 +324,12 @@ export function SettingsModule() {
               <header><h2>Gói dịch vụ & API model</h2><p>Quản lý hạn mức, thanh toán và nhà cung cấp AI.</p></header>
               <div className="settings-section subscription-current">
                 <span><Icon name="sparkles" /></span>
-                <div><small>Gói hiện tại</small><h3>Chưa kết nối hệ thống subscription</h3><p>Phần này sẽ hiển thị gói đang dùng, quota hội thoại và kỳ thanh toán.</p></div>
-                <em>Sắp triển khai</em>
+                <div><small>Quản lý gói</small><h3>Subscription đã được kết nối</h3><p>Xem gói hiện tại, quota, lịch sử yêu cầu và thay đổi gói.</p></div>
+                <Link className="sites-primary-button" href="/dashboard/subscription">Mở quản lý gói</Link>
               </div>
               <div className="settings-section custom-api-preview">
-                <div><h3>API model riêng</h3><p>Khách hàng gói Tùy chỉnh có thể kết nối OpenAI-compatible API, chọn model và tự thanh toán chi phí cho nhà cung cấp.</p></div>
-                <button disabled>Thêm nhà cung cấp AI</button>
+                <div><h3>API model riêng</h3><p>Khách hàng gói Tùy chỉnh có thể lưu API key đã mã hóa, chọn provider/model và theo dõi usage.</p></div>
+                <Link href="/dashboard/subscription">Cấu hình API model</Link>
               </div>
             </>
           )}

@@ -67,7 +67,9 @@ class IndexerService:
                 await mongodb.save_page(
                     url=page["url"],
                     title=page["title"],
-                    content=page["content"][:1000],  # Store preview
+                    # Re-indexing must use the same complete text as the initial
+                    # crawl. Saving only a preview silently drops later sections.
+                    content=page["content"],
                     chunk_count=len(chunks),
                     metadata={
                         **(page.get("metadata", {}) or {}),

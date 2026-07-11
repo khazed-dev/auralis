@@ -1,4 +1,4 @@
-import Image from "next/image";
+import { BrandLogo } from "@/components/ui/BrandLogo";
 
 const nav = [
   ["Nền tảng", "#features"],
@@ -12,13 +12,7 @@ export function Header() {
     <header className="site-header">
       <div className="container header-inner">
         <a className="brand" href="#" aria-label="Auralis home">
-          <Image
-            src="/logo-auralis.png"
-            alt="Auralis"
-            width={144}
-            height={48}
-            priority
-          />
+          <BrandLogo priority />
         </a>
         <nav className="desktop-nav" aria-label="Main navigation">
           {nav.map(([label, href]) => (

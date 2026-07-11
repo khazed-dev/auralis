@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 export async function POST(request: Request) {
   if (
     process.env.NODE_ENV !== "development" ||
-    process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS !== "true"
+    process.env.NEXT_PUBLIC_DASHBOARD_MOCK_MODE !== "true"
   ) {
     return NextResponse.json({ detail: "Không tìm thấy." }, { status: 404 });
   }

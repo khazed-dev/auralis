@@ -6678,3 +6678,16 @@ pre,
 @media (max-width: 520px) { .checkout-customer { grid-template-columns: 1fr; }.checkout-customer .wide { grid-column: auto; }.checkout-header span { display:none; }.success-card section > span { align-items: flex-start; flex-direction: column; gap: 3px; } }
 .promo-admin form { display: grid; grid-template-columns: 1.2fr .7fr 1fr auto; gap: 12px; }.promo-admin form input { min-width: 0; padding: 11px 12px; border: 1px solid #cbd5e1; border-radius: 9px; font: inherit; }.promo-list { display: flex; flex-wrap: wrap; gap: 10px; }.promo-list span { padding: 9px 12px; border-radius: 9px; background: #eff4ff; color: #334155; font-size: 13px; }.promo-list b { color: #091c66; }
 @media (max-width: 760px) { .promo-admin form { grid-template-columns: 1fr; } }
+:root {
+  --platform-primary: #091c66;
+  --platform-secondary: #12d6c7;
+}
+
+.platform-branding-footer {
+  margin-top: 14px;
+  color: #64748b;
+  font-size: 12px;
+  text-align: center;
+}
+
+.platform-branding-footer a { color: var(--platform-primary); }

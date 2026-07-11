@@ -63,6 +63,15 @@
       showAfterResponse: false,
       maxDisplay: 4,
     },
+    leadCapture: {
+      collectEmail: false,
+      emailRequired: false,
+      emailPrompt: "Nhập thông tin để chúng tôi có thể hỗ trợ bạn tốt hơn.",
+      collectName: false,
+      nameRequired: false,
+      captureTiming: "before_chat",
+      messagesBeforeCapture: 3,
+    },
   };
 
   const CHAT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -132,6 +141,17 @@
             prompts: Array.isArray(H["quick_prompts"]["prompts"]) ? H["quick_prompts"]["prompts"] : [],
             showAfterResponse: H["quick_prompts"]["show_after_response"] === true,
             maxDisplay: Number(H["quick_prompts"]["max_display"] || 4),
+          };
+        }
+        if (H["lead_capture"]) {
+          config.leadCapture = {
+            collectEmail: H["lead_capture"]["collect_email"] === true,
+            emailRequired: H["lead_capture"]["email_required"] === true,
+            emailPrompt: H["lead_capture"]["email_prompt"] || config.leadCapture.emailPrompt,
+            collectName: H["lead_capture"]["collect_name"] === true,
+            nameRequired: H["lead_capture"]["name_required"] === true,
+            captureTiming: H["lead_capture"]["capture_timing"] || "before_chat",
+            messagesBeforeCapture: Number(H["lead_capture"]["messages_before_capture"] || 3),
           };
         }
         injectDynamicThemeStyles(), syncHeaderAndWelcomeText(), syncQuickPrompts(), updateBrandingFooter();
@@ -731,6 +751,21 @@
   document["head"]["appendChild"](fontLinkEl);
   const baseStyleEl = document["createElement"]("style");
   baseStyleEl["textContent"] = baseWidgetCss, document["head"]["appendChild"](baseStyleEl);
+  const leadCaptureStyleEl = document["createElement"]("style");
+  leadCaptureStyleEl["textContent"] = `
+    .sitechat-lead-capture { background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:16px; box-shadow:0 8px 24px rgba(15,23,42,.08); }
+    .sitechat-lead-capture h4 { margin:0 0 6px; color:#0f172a; font-size:15px; }
+    .sitechat-lead-capture p { margin:0 0 12px; color:#64748b; font-size:13px; line-height:1.45; }
+    .sitechat-lead-capture form { display:grid; gap:9px; }
+    .sitechat-lead-capture input:not([type="hidden"]) { width:100%; padding:10px 11px; border:1px solid #cbd5e1; border-radius:8px; font:inherit; font-size:13px; outline:none; }
+    .sitechat-lead-capture input:focus { border-color:${config.primaryColor}; box-shadow:0 0 0 3px ${config.primaryColor}18; }
+    .sitechat-lead-actions { display:flex; gap:8px; margin-top:2px; }
+    .sitechat-lead-actions button { flex:1; padding:9px 12px; border-radius:8px; cursor:pointer; font:inherit; font-size:13px; font-weight:600; }
+    .sitechat-lead-submit { color:#fff; background:${config.primaryColor}; border:0; }
+    .sitechat-lead-skip { color:#475569; background:#fff; border:1px solid #cbd5e1; }
+    .sitechat-lead-error { color:#b91c1c !important; margin:0 !important; }
+  `;
+  document["head"]["appendChild"](leadCaptureStyleEl);
   const widgetRoot = document["createElement"]("div");
   widgetRoot["className"] = "sitechat-widget", widgetRoot["innerHTML"] = '\n    <button class="sitechat-toggle" aria-label="Toggle chat">\n      <svg class="sitechat-icon-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n        <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2v10z"/>\n      </svg>\n      <svg class="sitechat-icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n        <line x1="18" y1="6" x2="6" y2="18"/>\n        <line x1="6" y1="6" x2="18" y2="18"/>\n      </svg>\n    </button>\n    \n    <div class="sitechat-window">\n      <div class="sitechat-header">\n        <div class="sitechat-header-icon">\n          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n            <path d="M12 2L2 7l10 5 10-5-10-5z"/>\n            <path d="M2 17l10 5 10-5"/>\n            <path d="M2 12l10 5 10-5"/>\n          </svg>\n        </div>\n        <div class="sitechat-header-text">\n          <h3>' + config.title + '</h3>\n          <p>Powered by AI</p>\n        </div>\n        <div class="sitechat-header-actions" style="display:flex;align-items:center;gap:8px;flex-shrink:0;">\n          <button type="button" class="sitechat-handoff-btn" title="Talk to a live agent" data-state="idle">\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">\n              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>\n              <circle cx="9" cy="7" r="4"/>\n              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>\n              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>\n            </svg>\n            <span class="sitechat-live-agent-label">Live agent</span>\n          </button>\n          <button type="button" class="sitechat-header-close sitechat-close-btn" aria-label="Close chat">\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n              <line x1="18" y1="6" x2="6" y2="18"/>\n              <line x1="6" y1="6" x2="18" y2="18"/>\n            </svg>\n          </button>\n        </div>\n      </div>\n      \n      <div class="sitechat-messages">\n        <div class="sitechat-welcome">\n          <div class="sitechat-welcome-icon">\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">\n              <path d="M12 2L2 7l10 5 10-5-10-5z"/>\n              <path d="M2 17l10 5 10-5"/>\n              <path d="M2 12l10 5 10-5"/>\n            </svg>\n          </div>\n          <h4>Hi there! 👋</h4>\n          <p>I\'m your AI assistant. Ask me anything about this website.</p>\n          <div class="sitechat-welcome-suggestions">\n            <button class="sitechat-suggestion" data-query="What can you help me with?">What can you help me with?</button>\n            <button class="sitechat-suggestion" data-query="Tell me about this website">Tell me about this website</button>\n          </div>\n        </div>\n      </div>\n      \n      <div class="sitechat-input-wrapper">\n        <form class="sitechat-input-form">\n          <input type="text" class="sitechat-input" placeholder="Type your message..." autocomplete="off">\n          <button type="submit" class="sitechat-send" disabled>\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n              <line x1="22" y1="2" x2="11" y2="13"/>\n              <polygon points="22 2 15 22 11 13 2 9 22 2"/>\n            </svg>\n          </button>\n        </form>\n      </div>\n      \n      <div class="sitechat-branding">\n        <a href="' + config.apiUrl + '" target="_blank" rel="noopener noreferrer">\n          Powered by <strong>SiteChat</strong>\n        </a>\n      </div>\n    </div>\n  ',
     document["body"]["appendChild"](widgetRoot), injectResponsiveStyles(), updateBrandingFooter();
@@ -817,6 +852,135 @@
     passive: true
   })), scheduleMobileViewportOffsets();
   let chatOpen = false, welcomeRemoved = false, lastMessageIndex = -1;
+  let leadCaptured = false, leadChecked = false, leadDismissed = false;
+  let userMessageCount = 0, leadPromptPromise = null;
+
+  function isLeadCaptureEnabled() {
+    return config.leadCapture.collectEmail || config.leadCapture.collectName;
+  }
+
+  async function checkLeadCaptured() {
+    if (leadChecked || !isLeadCaptureEnabled()) return leadCaptured;
+    leadChecked = true;
+    try {
+      const response = await fetch(
+        config.apiUrl + "/api/leads/check/" + encodeURIComponent(config.siteId) + "/" + encodeURIComponent(sessionId)
+      );
+      if (response.ok) leadCaptured = Boolean((await response.json())["exists"]);
+    } catch (error) { }
+    return leadCaptured;
+  }
+
+  async function showLeadCaptureForm(source) {
+    if (!isLeadCaptureEnabled() || leadCaptured || leadDismissed) return true;
+    if (await checkLeadCaptured()) return true;
+    if (leadPromptPromise) return leadPromptPromise;
+
+    leadPromptPromise = new Promise(resolve => {
+      const required = config.leadCapture.emailRequired || config.leadCapture.nameRequired;
+      const card = document.createElement("div");
+      card.className = "sitechat-lead-capture";
+      const title = document.createElement("h4");
+      title.textContent = "Thông tin liên hệ";
+      const description = document.createElement("p");
+      description.textContent = config.leadCapture.emailPrompt;
+      const form = document.createElement("form");
+
+      let nameInput = null, emailInput = null;
+      if (config.leadCapture.collectName) {
+        nameInput = document.createElement("input");
+        nameInput.name = "name";
+        nameInput.placeholder = "Họ và tên";
+        nameInput.autocomplete = "name";
+        nameInput.required = config.leadCapture.nameRequired;
+        form.appendChild(nameInput);
+      }
+      if (config.leadCapture.collectEmail) {
+        emailInput = document.createElement("input");
+        emailInput.name = "email";
+        emailInput.type = "email";
+        emailInput.placeholder = "Email";
+        emailInput.autocomplete = "email";
+        emailInput.required = config.leadCapture.emailRequired;
+        form.appendChild(emailInput);
+      }
+      const honeypot = document.createElement("input");
+      honeypot.name = "website";
+      honeypot.type = "hidden";
+      honeypot.tabIndex = -1;
+      form.appendChild(honeypot);
+      const errorText = document.createElement("p");
+      errorText.className = "sitechat-lead-error";
+      const actions = document.createElement("div");
+      actions.className = "sitechat-lead-actions";
+      if (!required) {
+        const skip = document.createElement("button");
+        skip.type = "button";
+        skip.className = "sitechat-lead-skip";
+        skip.textContent = "Bỏ qua";
+        skip.addEventListener("click", () => {
+          leadDismissed = true;
+          card.remove();
+          inputEl.disabled = false;
+          resolve(true);
+        });
+        actions.appendChild(skip);
+      }
+      const submit = document.createElement("button");
+      submit.className = "sitechat-lead-submit";
+      submit.textContent = "Gửi thông tin";
+      actions.appendChild(submit);
+      form.appendChild(errorText);
+      form.appendChild(actions);
+      card.appendChild(title);
+      card.appendChild(description);
+      card.appendChild(form);
+      messagesEl.appendChild(card);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      inputEl.disabled = true;
+
+      form.addEventListener("submit", async event => {
+        event.preventDefault();
+        const name = nameInput ? nameInput.value.trim() : "";
+        const email = emailInput ? emailInput.value.trim() : "";
+        if (!name && !email) {
+          errorText.textContent = "Vui lòng nhập ít nhất một thông tin liên hệ.";
+          return;
+        }
+        submit.disabled = true;
+        errorText.textContent = "";
+        try {
+          const response = await fetch(config.apiUrl + "/api/leads", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              site_id: config.siteId,
+              session_id: sessionId,
+              email: email || null,
+              name: name || null,
+              source: source || "chat",
+              website: honeypot.value || null,
+            }),
+          });
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.detail || "Không thể lưu thông tin.");
+          }
+          leadCaptured = true;
+          card.remove();
+          inputEl.disabled = false;
+          resolve(true);
+        } catch (error) {
+          errorText.textContent = error instanceof Error ? error.message : "Không thể lưu thông tin.";
+          submit.disabled = false;
+        }
+      });
+    }).finally(() => {
+      leadPromptPromise = null;
+      inputEl.focus();
+    });
+    return leadPromptPromise;
+  }
 
   function persistMessage(content, role, sources, timestamp) {
     try {
@@ -882,6 +1046,10 @@
     lastMessageIndex = -1;
     handoffState.mode = "ai";
     handoffState.handoffId = null;
+    leadCaptured = false;
+    leadChecked = false;
+    leadDismissed = false;
+    userMessageCount = 0;
     const header = widgetRoot["querySelector"](".sitechat-header");
     if (header) header["classList"]["remove"]("handoff-mode");
     if (headerSubtitle) headerSubtitle["textContent"] = "Trợ lý tư vấn AI";
@@ -915,7 +1083,10 @@
     if (chatOpen) inputEl["focus"]();
   }), headerCloseBtn && headerCloseBtn["addEventListener"]("click", G => {
     G["stopPropagation"](), chatOpen && toggleBtn["click"]();
-  }), handoffBtn["addEventListener"]("click", () => {
+  }), handoffBtn["addEventListener"]("click", async () => {
+    if (config.leadCapture.captureTiming === "on_handoff") {
+      await showLeadCaptureForm("handoff");
+    }
     handoff["requestHandoff"]("user_request");
   }), inputEl["addEventListener"]("input", () => {
     sendBtn["disabled"] = !inputEl["value"]["trim"]();
@@ -947,7 +1118,12 @@
     G["preventDefault"]();
     const H = inputEl["value"]["trim"]();
     if (!H) return;
+    if (config.leadCapture.captureTiming === "before_chat") {
+      const canContinue = await showLeadCaptureForm("chat");
+      if (!canContinue) return;
+    }
     inputEl["value"] = "", sendBtn["disabled"] = true;
+    userMessageCount++;
     if (!welcomeRemoved) {
       const J = messagesEl["querySelector"](".sitechat-welcome");
       if (J) J["remove"]();
@@ -973,6 +1149,9 @@
         })
       }), M = await L["json"]();
       typingRow["remove"](), appendMessage(M["answer"] || M["response"] || "Không nhận được phản hồi", "bot", M["sources"]), M["suggest_handoff"] && showHandoffSuggestion(M["handoff_reason"]);
+      if (config.leadCapture.captureTiming === "after_messages" && userMessageCount >= config.leadCapture.messagesBeforeCapture) {
+        void showLeadCaptureForm("chat");
+      }
     } catch (N) {
       typingRow["remove"](), appendMessage("Xin lỗi, đã xảy ra lỗi. Vui lòng thử lại.", "bot");
     }
@@ -980,7 +1159,10 @@
   function showHandoffSuggestion(G) {
     const H = document["createElement"]("div");
     H["className"] = "sitechat-handoff-suggestion", H["innerHTML"] = '\n      <p>Bạn có muốn trò chuyện với nhân viên tư vấn không?</p>\n      <div class="sitechat-handoff-suggestion-buttons">\n        <button class="sitechat-handoff-yes">Có, kết nối ngay</button>\n        <button class="sitechat-handoff-no">Không, cảm ơn</button>\n      </div>\n    ',
-      H["querySelector"](".sitechat-handoff-yes")["addEventListener"]("click", () => {
+      H["querySelector"](".sitechat-handoff-yes")["addEventListener"]("click", async () => {
+        if (config.leadCapture.captureTiming === "on_handoff") {
+          await showLeadCaptureForm("handoff");
+        }
         H["remove"](), handoff["requestHandoff"](G || "ai_suggested");
       }), H["querySelector"](".sitechat-handoff-no")["addEventListener"]("click", () => {
         H["remove"]();

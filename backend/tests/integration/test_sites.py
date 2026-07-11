@@ -104,6 +104,21 @@ class TestSiteConfigEndpoints:
         assert "behavior" in data
         assert "security" not in data
         assert "system_prompt" not in data.get("behavior", {})
+        assert "lead_capture" in data
+
+    @pytest.mark.asyncio
+    async def test_platform_branding_can_hide_widget_branding(
+        self, client, mock_database, sample_site
+    ):
+        mock_database.seed_site(sample_site)
+        await mock_database.update_platform_whitelabel(
+            {"hide_sitechat_branding": True}
+        )
+
+        response = await client.get(f"/api/sites/{sample_site['site_id']}/config")
+
+        assert response.status_code == 200
+        assert response.json()["appearance"]["hide_branding"] is True
     
     @pytest.mark.asyncio
     async def test_get_site_config_not_found(self, client, mock_database):

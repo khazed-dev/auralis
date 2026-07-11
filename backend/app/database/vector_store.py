@@ -15,6 +15,43 @@ from loguru import logger
 from app.config import settings
 
 
+# Keep lexical retrieval focused on terms that carry meaning. BM25's IDF is not
+# enough for very small corpora, where a generic word can otherwise look rare
+# and promote an unrelated chunk.
+_SEARCH_STOPWORDS = {
+    "a", "an", "and", "are", "be", "for", "from", "how", "in", "is", "me",
+    "of", "on", "or", "please", "product", "tell", "the", "this", "to", "what",
+    "with", "you", "your",
+    "ai", "ban", "bang", "bi", "cac", "cho", "co", "cua", "da", "de", "do",
+    "duoc", "gi", "hay", "khong", "la", "minh", "mot", "nay", "nhung", "o",
+    "san", "pham", "thi", "toi", "tu", "va", "ve", "voi",
+    "bạn", "bằng", "bị", "các", "cho", "có", "của", "đã", "để", "đó",
+    "được", "gì", "hãy", "không", "là", "mình", "một", "này", "những", "ở",
+    "sản", "phẩm", "thì", "tôi", "từ", "và", "về", "với",
+}
+
+
+def search_tokens(text: str, *, drop_stopwords: bool = False) -> List[str]:
+    """Tokenize Vietnamese text and product codes consistently."""
+    normalized = unicodedata.normalize("NFKC", text or "").lower()
+    tokens = re.findall(r"[\w]+(?:[-./][\w]+)*", normalized, flags=re.UNICODE)
+    if not drop_stopwords:
+        return tokens
+    informative = [token for token in tokens if token not in _SEARCH_STOPWORDS]
+    # A stopword-only query is still searchable instead of becoming empty.
+    return informative or tokens
+
+
+_TRANSIENT_RETRIEVAL_KEYS = {
+    "_retrieval",
+    "_dense_score",
+    "_keyword_score",
+    "_keyword_match_count",
+    "_keyword_match_ratio",
+    "_exact_phrase_match",
+}
+
+
 class VectorStore:
     """FAISS vector store with HuggingFace embeddings."""
     
@@ -112,8 +149,13 @@ class VectorStore:
         k = k or settings.RETRIEVAL_K
         
         try:
-            # FAISS doesn't support filtering directly, so we fetch more and filter
-            results = self.vector_store.similarity_search(query, k=k)
+            # Fetch before filtering. Filtering only the unscoped top-k can return
+            # no hits for a tenant even when matching documents exist lower down.
+            fetch_k = k
+            if filter:
+                ntotal = int(getattr(self.vector_store.index, "ntotal", 0) or 0)
+                fetch_k = min(ntotal, max(k, settings.RAG_MAX_CANDIDATES))
+            results = self.vector_store.similarity_search(query, k=fetch_k)
             
             # Apply filter if provided
             if filter:
@@ -122,7 +164,7 @@ class VectorStore:
                     if all(doc.metadata.get(key) == value for key, value in filter.items())
                 ]
             
-            return results
+            return results[:k]
         except Exception as e:
             logger.error(f"Similarity search failed: {e}")
             return []
@@ -140,7 +182,11 @@ class VectorStore:
         k = k or settings.RETRIEVAL_K
         
         try:
-            results = self.vector_store.similarity_search_with_score(query, k=k)
+            fetch_k = k
+            if filter:
+                ntotal = int(getattr(self.vector_store.index, "ntotal", 0) or 0)
+                fetch_k = min(ntotal, max(k, settings.RAG_MAX_CANDIDATES))
+            results = self.vector_store.similarity_search_with_score(query, k=fetch_k)
             
             # Apply filter if provided
             if filter:
@@ -149,7 +195,7 @@ class VectorStore:
                     if all(doc.metadata.get(key) == value for key, value in filter.items())
                 ]
             
-            return results
+            return results[:k]
         except Exception as e:
             logger.error(f"Similarity search with score failed: {e}")
             return []
@@ -157,8 +203,7 @@ class VectorStore:
     @staticmethod
     def _tokens(text: str) -> List[str]:
         """Tokenize Vietnamese and product codes without external NLP packages."""
-        normalized = unicodedata.normalize("NFKC", text or "").lower()
-        return re.findall(r"[\w]+(?:[-./][\w]+)*", normalized, flags=re.UNICODE)
+        return search_tokens(text)
 
     @staticmethod
     def _matches_filter(doc: Document, filter: Dict = None) -> bool:
@@ -215,8 +260,10 @@ class VectorStore:
 
         docstore = getattr(self.vector_store.docstore, "_dict", {})
         corpus = [doc for doc in docstore.values() if isinstance(doc, Document) and in_scope(doc)]
-        query_tokens = self._tokens(query)
+        query_tokens = search_tokens(query, drop_stopwords=True)
         query_counts = Counter(query_tokens)
+        unique_query_tokens = set(query_tokens)
+        normalized_query = unicodedata.normalize("NFKC", query).lower().strip()
 
         lexical_scores = []
         if query_tokens and corpus:
@@ -239,11 +286,21 @@ class VectorStore:
                     score += qtf * idf * (tf * 2.2) / (tf + length_norm)
 
                 title = unicodedata.normalize("NFKC", doc.metadata.get("title", "")).lower()
-                normalized_query = unicodedata.normalize("NFKC", query).lower().strip()
+                normalized_doc = unicodedata.normalize(
+                    "NFKC", f"{doc.metadata.get('title', '')} {doc.page_content}"
+                ).lower()
+                matched_tokens = unique_query_tokens.intersection(counts)
+                match_count = len(matched_tokens)
+                match_ratio = match_count / max(1, len(unique_query_tokens))
+                exact_phrase_match = bool(
+                    normalized_query and normalized_query in normalized_doc
+                )
                 if normalized_query and normalized_query in title:
                     score += 3.0
                 if score > 0:
-                    lexical_scores.append((doc, score))
+                    lexical_scores.append(
+                        (doc, score, match_count, match_ratio, exact_phrase_match)
+                    )
 
         lexical_scores.sort(key=lambda item: item[1], reverse=True)
         dense_results.sort(key=lambda item: item[1])
@@ -262,14 +319,31 @@ class VectorStore:
             )
             fused[key]["score"] += dense_weight / (rrf_constant + rank)
             fused[key]["dense_score"] = dense_score
-        for rank, (doc, lexical_score) in enumerate(lexical_scores, start=1):
+        for rank, lexical_result in enumerate(lexical_scores, start=1):
+            doc, lexical_score, match_count, match_ratio, exact_phrase_match = lexical_result
             key = self._doc_key(doc)
             fused.setdefault(
                 key,
-                {"doc": doc, "score": 0.0, "dense_score": None, "keyword_score": 0.0},
+                {
+                    "doc": doc,
+                    "score": 0.0,
+                    "dense_score": None,
+                    "keyword_score": 0.0,
+                    "keyword_match_count": 0,
+                    "keyword_match_ratio": 0.0,
+                    "exact_phrase_match": False,
+                },
             )
             fused[key]["score"] += keyword_weight / (rrf_constant + rank)
+            if exact_phrase_match:
+                # RRF normally ignores score magnitude. Preserve a controlled
+                # advantage for exact product names/codes without letting raw
+                # BM25 scales dominate semantic retrieval.
+                fused[key]["score"] += (keyword_weight * 0.5) / (rrf_constant + 1)
             fused[key]["keyword_score"] = lexical_score
+            fused[key]["keyword_match_count"] = match_count
+            fused[key]["keyword_match_ratio"] = match_ratio
+            fused[key]["exact_phrase_match"] = exact_phrase_match
 
         ranked = sorted(fused.values(), key=lambda item: item["score"], reverse=True)[:k]
         if not ranked:
@@ -277,10 +351,27 @@ class VectorStore:
         best = ranked[0]["score"]
         results = []
         for item in ranked:
-            item["doc"].metadata["_retrieval"] = "hybrid"
-            item["doc"].metadata["_dense_score"] = item["dense_score"]
-            item["doc"].metadata["_keyword_score"] = item["keyword_score"]
-            results.append((item["doc"], 1.0 - item["score"] / best))
+            source_doc = item["doc"]
+            metadata = {
+                key: value
+                for key, value in source_doc.metadata.items()
+                if key not in _TRANSIENT_RETRIEVAL_KEYS
+            }
+            metadata.update(
+                {
+                    "_retrieval": "hybrid",
+                    "_dense_score": item["dense_score"],
+                    "_keyword_score": item["keyword_score"],
+                    "_keyword_match_count": item.get("keyword_match_count", 0),
+                    "_keyword_match_ratio": item.get("keyword_match_ratio", 0.0),
+                    "_exact_phrase_match": item.get("exact_phrase_match", False),
+                }
+            )
+            result_doc = Document(
+                page_content=source_doc.page_content,
+                metadata=metadata,
+            )
+            results.append((result_doc, 1.0 - item["score"] / best))
         return results
     
     def delete_by_metadata(self, filter: Dict) -> bool:

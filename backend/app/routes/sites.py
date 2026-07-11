@@ -168,8 +168,13 @@ async def get_site_config(
     
     config = SiteConfig(**(site.get("config") or {}))
     # Public widget bootstrap: explicitly allow-list client-visible fields.
+    public_appearance = config.appearance.model_dump()
+    platform_branding = await db.get_platform_whitelabel() or {}
+    if platform_branding.get("hide_sitechat_branding") is True:
+        public_appearance["hide_branding"] = True
+
     return {
-        "appearance": config.appearance.model_dump(),
+        "appearance": public_appearance,
         "behavior": {
             "temperature": config.behavior.temperature,
             "max_tokens": config.behavior.max_tokens,

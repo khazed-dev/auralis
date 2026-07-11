@@ -20,6 +20,7 @@ from app.config import settings
 from app.database import get_mongodb, get_vector_store
 from app.services.factory import get_llm_service
 from app.models.schemas import ChatResponse, SourceDocument
+from app.database.vector_store import search_tokens
 
 
 def _truncate_text(text: str, max_chars: int) -> str:
@@ -52,7 +53,8 @@ class RAGEngine:
         self.llm = llm_service or get_llm_service()
         self.vector_store = get_vector_store()
         self._qa_cache: Dict[str, List[Dict]] = {}  # Cache Q&A pairs by site_id
-        self._qa_embeddings_cache: Dict[str, List[Tuple[str, List[float]]]] = {}  # Cache Q&A embeddings
+        # site_id -> (Q&A ids, row-normalized embedding matrix)
+        self._qa_embeddings_cache: Dict[str, Tuple[List[str], np.ndarray]] = {}
     
     async def _check_qa_match(
         self,
@@ -84,44 +86,53 @@ class RAGEngine:
             # Get embeddings for Q&A questions if not cached
             if site_id not in self._qa_embeddings_cache:
                 embeddings_model = self.vector_store.embeddings
-                qa_embeddings = []
-                
-                for qa in qa_pairs:
-                    question = qa.get("question", "")
-                    embedding = embeddings_model.embed_query(question)
-                    qa_embeddings.append((qa["id"], embedding))
-                
-                self._qa_embeddings_cache[site_id] = qa_embeddings
+                valid_pairs = [qa for qa in qa_pairs if (qa.get("question") or "").strip()]
+                qa_ids = [qa["id"] for qa in valid_pairs]
+                questions = [qa["question"] for qa in valid_pairs]
+                if not questions:
+                    return None
+
+                def _embed_questions():
+                    embed_documents = getattr(embeddings_model, "embed_documents", None)
+                    if callable(embed_documents):
+                        return embed_documents(questions)
+                    return [embeddings_model.embed_query(question) for question in questions]
+
+                vectors = await asyncio.to_thread(_embed_questions)
+                matrix = np.asarray(vectors, dtype=np.float32)
+                if matrix.ndim != 2 or matrix.shape[0] != len(qa_ids):
+                    raise ValueError("Invalid Q&A embedding matrix")
+                norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+                matrix = np.divide(
+                    matrix,
+                    norms,
+                    out=np.zeros_like(matrix),
+                    where=norms > 0,
+                )
+                self._qa_embeddings_cache[site_id] = (qa_ids, matrix)
             
-            qa_embeddings = self._qa_embeddings_cache.get(site_id, [])
+            qa_ids, qa_matrix = self._qa_embeddings_cache.get(site_id, ([], np.empty((0, 0))))
             
-            if not qa_embeddings:
+            if not qa_ids or qa_matrix.size == 0:
                 return None
             
             # Get query embedding
             embeddings_model = self.vector_store.embeddings
-            query_embedding = embeddings_model.embed_query(query)
-            query_embedding = np.array(query_embedding)
-            
-            # Find best matching Q&A pair using cosine similarity
-            best_match = None
-            best_score = 0.0
-            
-            for qa_id, qa_emb in qa_embeddings:
-                qa_emb_array = np.array(qa_emb)
-                
-                # Cosine similarity
-                dot_product = np.dot(query_embedding, qa_emb_array)
-                norm_product = np.linalg.norm(query_embedding) * np.linalg.norm(qa_emb_array)
-                
-                if norm_product > 0:
-                    similarity = dot_product / norm_product
-                else:
-                    similarity = 0.0
-                
-                if similarity > best_score:
-                    best_score = similarity
-                    best_match = next((qa for qa in qa_pairs if qa["id"] == qa_id), None)
+            query_embedding = np.asarray(
+                await asyncio.to_thread(embeddings_model.embed_query, query),
+                dtype=np.float32,
+            )
+            query_norm = np.linalg.norm(query_embedding)
+            if query_norm == 0 or query_embedding.ndim != 1:
+                return None
+            if qa_matrix.shape[1] != query_embedding.shape[0]:
+                raise ValueError("Q&A and query embedding dimensions differ")
+
+            similarities = qa_matrix @ (query_embedding / query_norm)
+            best_index = int(np.argmax(similarities))
+            best_score = float(similarities[best_index])
+            best_id = qa_ids[best_index]
+            best_match = next((qa for qa in qa_pairs if qa["id"] == best_id), None)
             
             if best_match and best_score >= self.QA_MATCH_THRESHOLD:
                 logger.info(f"Q&A match found: '{best_match['question'][:50]}...' with score {best_score:.3f}")
@@ -441,30 +452,30 @@ Rewritten search query (just the query, no explanation):"""
             return []
         
         graded = []
-        query_terms = set(re.findall(r"[\w-]+", query.lower(), flags=re.UNICODE))
+        query_terms = set(search_tokens(query, drop_stopwords=True))
         best_score = min(score for _, score in docs)
 
-        for index, (doc, score) in enumerate(docs):
+        for doc, score in docs:
             doc_text = f"{doc.metadata.get('title', '')} {doc.page_content}".lower()
+            doc_terms = set(search_tokens(doc_text))
             overlap_ratio = (
-                sum(1 for term in query_terms if term in doc_text) / len(query_terms)
+                len(query_terms.intersection(doc_terms)) / len(query_terms)
                 if query_terms
                 else 0.0
             )
 
             if doc.metadata.get("_retrieval") == "hybrid":
                 dense_score = doc.metadata.get("_dense_score")
-                keyword_score = float(doc.metadata.get("_keyword_score") or 0.0)
                 keep = (
-                    keyword_score > 0
+                    self._has_keyword_evidence(doc)
                     or (dense_score is not None and dense_score <= settings.RAG_MAX_DENSE_DISTANCE)
-                    or overlap_ratio >= 0.25
+                    or overlap_ratio >= 0.5
                 )
             else:
                 # Dense distance scales differ by embedding model, so compare
                 # with the best hit instead of using MiniLM's fixed threshold.
                 keep = (
-                    (score <= settings.RAG_MAX_DENSE_DISTANCE and score <= best_score + 0.45)
+                    (score <= settings.RAG_MAX_DENSE_DISTANCE and score <= best_score + 0.55)
                     or overlap_ratio >= 0.3
                 )
 
@@ -472,6 +483,17 @@ Rewritten search query (just the query, no explanation):"""
                 graded.append((doc, score))
 
         return graded
+
+    @staticmethod
+    def _has_keyword_evidence(doc: Document) -> bool:
+        """Require meaningful lexical coverage, not merely one generic hit."""
+        match_count = int(doc.metadata.get("_keyword_match_count") or 0)
+        match_ratio = float(doc.metadata.get("_keyword_match_ratio") or 0.0)
+        return bool(
+            doc.metadata.get("_exact_phrase_match")
+            or (match_count >= 2 and match_ratio >= 0.4)
+            or (match_count >= 1 and match_ratio >= 0.75)
+        )
     
     def _build_context(
         self,
@@ -515,7 +537,7 @@ Rewritten search query (just the query, no explanation):"""
                 if dense_score is not None
                 else 0.0
             )
-            keyword_bonus = 0.15 if doc.metadata.get("_keyword_score", 0) else 0.0
+            keyword_bonus = 0.15 if RAGEngine._has_keyword_evidence(doc) else 0.0
             return min(1.0, semantic + keyword_bonus)
         return max(0, min(1, 1 - score / 2))
     

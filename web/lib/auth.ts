@@ -13,9 +13,11 @@ type TokenResponse = {
 };
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
+// Mock data must be an explicit opt-in. The previous dev-auth flag silently
+// turned Dashboard mutations into local state updates instead of API calls.
 export const DEV_AUTH_ENABLED =
   process.env.NODE_ENV === "development" &&
-  process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === "true";
+  process.env.NEXT_PUBLIC_DASHBOARD_MOCK_MODE === "true";
 
 export function getDashboardHome(role: DashboardUser["role"]): string {
   if (role === "platform_admin") return "/platform";
