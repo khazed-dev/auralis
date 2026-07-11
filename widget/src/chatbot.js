@@ -586,6 +586,8 @@
             session_id: sessionId,
             site_id: config.siteId,
             reason: G,
+            visitor_name: leadContact.name,
+            visitor_email: leadContact.email,
             ai_conversation: I
           })
         });
@@ -853,6 +855,7 @@
   })), scheduleMobileViewportOffsets();
   let chatOpen = false, welcomeRemoved = false, lastMessageIndex = -1;
   let leadCaptured = false, leadChecked = false, leadDismissed = false;
+  let leadContact = { name: null, email: null };
   let userMessageCount = 0, leadPromptPromise = null;
 
   function isLeadCaptureEnabled() {
@@ -967,6 +970,7 @@
             throw new Error(payload.detail || "Không thể lưu thông tin.");
           }
           leadCaptured = true;
+          leadContact = { name: name || null, email: email || null };
           card.remove();
           inputEl.disabled = false;
           resolve(true);
@@ -1047,6 +1051,7 @@
     handoffState.mode = "ai";
     handoffState.handoffId = null;
     leadCaptured = false;
+    leadContact = { name: null, email: null };
     leadChecked = false;
     leadDismissed = false;
     userMessageCount = 0;

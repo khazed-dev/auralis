@@ -81,8 +81,27 @@ async def create_handoff(request: Request, body: HandoffRequest):
     await require_widget_site(request, body.site_id)
     mongodb = await get_mongodb()
 
+    # Lead capture and handoff are separate widget requests. Resolve the visitor
+    # identity from the lead saved for this exact site/session so handoff agents
+    # see the customer's name even when the widget did not repeat it.
+    visitor_name = body.visitor_name
+    visitor_email = body.visitor_email
+    if not visitor_name or not visitor_email:
+        lead = await mongodb.get_lead_by_session(body.site_id, body.session_id)
+        if lead:
+            visitor_name = visitor_name or lead.get("name")
+            visitor_email = visitor_email or lead.get("email")
+
     existing = await mongodb.get_handoff_by_session(body.session_id, active_only=True)
     if existing:
+        if (visitor_name and not existing.get("visitor_name")) or (
+            visitor_email and not existing.get("visitor_email")
+        ):
+            await mongodb.update_handoff_visitor(
+                existing["handoff_id"],
+                visitor_name=visitor_name,
+                visitor_email=visitor_email,
+            )
         # Visitor tapped "connect to agent" again while still pending — bump queue ordering + dashboard "new" signal.
         if existing.get("status") == "pending":
             await mongodb.bump_handoff_visitor_requeue_pending(existing["handoff_id"])
@@ -106,8 +125,8 @@ async def create_handoff(request: Request, body: HandoffRequest):
         session_id=body.session_id,
         site_id=body.site_id,
         reason=body.reason,
-        visitor_email=body.visitor_email,
-        visitor_name=body.visitor_name,
+        visitor_email=visitor_email,
+        visitor_name=visitor_name,
         ai_conversation=body.ai_conversation,
         ai_summary=ai_summary
     )

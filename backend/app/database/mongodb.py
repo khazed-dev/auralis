@@ -1102,6 +1102,25 @@ class MongoDB:
         if handoff:
             handoff["_id"] = str(handoff["_id"])
         return handoff
+
+    async def update_handoff_visitor(
+        self,
+        handoff_id: str,
+        visitor_name: str = None,
+        visitor_email: str = None,
+    ) -> bool:
+        """Fill visitor identity on an existing handoff without clearing known fields."""
+        update = {"updated_at": datetime.utcnow()}
+        if visitor_name:
+            update["visitor_name"] = visitor_name
+        if visitor_email:
+            update["visitor_email"] = visitor_email
+        if len(update) == 1:
+            return True
+        result = await self.db.handoff_sessions.update_one(
+            {"handoff_id": handoff_id}, {"$set": update}
+        )
+        return result.matched_count > 0
     
     async def get_handoff_by_session(self, session_id: str, active_only: bool = True) -> Optional[Dict]:
         """Get active handoff for a chat session."""

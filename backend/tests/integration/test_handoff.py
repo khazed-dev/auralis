@@ -118,6 +118,27 @@ class TestCreateHandoff:
         response = await client.post("/api/handoff", json=request_data)
         
         assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_create_handoff_uses_lead_identity(self, client, mock_mongodb, sample_site, sample_handoff_data):
+        """A lead captured for the same site/session identifies the handoff visitor."""
+        mock_mongodb.get_handoff_by_session = AsyncMock(return_value=None)
+        mock_mongodb.get_lead_by_session = AsyncMock(return_value={
+            "name": "Trần Kha",
+            "email": "kha@example.com",
+        })
+        mock_mongodb.create_handoff_session = AsyncMock(return_value=sample_handoff_data)
+        mock_mongodb.seed_site(sample_site)
+
+        response = await client.post("/api/handoff", json={
+            "session_id": "session_123",
+            "site_id": sample_site["site_id"],
+        })
+
+        assert response.status_code == 200
+        create_kwargs = mock_mongodb.create_handoff_session.await_args.kwargs
+        assert create_kwargs["visitor_name"] == "Trần Kha"
+        assert create_kwargs["visitor_email"] == "kha@example.com"
     
     @pytest.mark.asyncio
     async def test_create_handoff_with_long_conversation(self, client, mock_mongodb, sample_site, sample_handoff_data):
