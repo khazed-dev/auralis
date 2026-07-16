@@ -581,6 +581,43 @@ class TestRAGEngineIntegration:
             engine2 = get_rag_engine()
             
             assert engine1 is engine2
+
+    @pytest.mark.asyncio
+    async def test_chat_stream_yields_chunks_and_done(
+        self,
+        rag_engine,
+        mock_ollama_service,
+        mock_vector_store_rag,
+    ):
+        async def stream_response(*args, **kwargs):
+            yield "Xin "
+            yield "chào"
+
+        mock_ollama_service.generate_stream = stream_response
+        mock_vector_store_rag.hybrid_search_with_score.return_value = []
+
+        mongodb = MagicMock()
+        mongodb.db.sites.find_one = AsyncMock(return_value=None)
+        mongodb.get_conversation_history = AsyncMock(return_value=[])
+        mongodb.get_qa_for_rag = AsyncMock(return_value=[])
+        mongodb.save_message = AsyncMock()
+
+        with patch("app.services.rag_engine.get_mongodb", AsyncMock(return_value=mongodb)):
+            events = [
+                event
+                async for event in rag_engine.chat_stream(
+                    "Xin chào",
+                    session_id="session-1",
+                    site_id="site-1",
+                )
+            ]
+
+        assert events[0] == {"type": "chunk", "content": "Xin"}
+        assert events[1] == {"type": "chunk", "content": " chào"}
+        assert events[-1]["type"] == "done"
+        assert events[-1]["answer"] == "Xin chào"
+        assert events[-1]["confidence"] == 0.3
+        assert mongodb.save_message.await_count == 2
     
     def test_get_system_prompt_without_site(self, rag_engine):
         """System prompt should use generic description without site name."""

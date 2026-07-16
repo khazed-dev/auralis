@@ -1142,18 +1142,8 @@
     }
     const typingRow = showTypingIndicator();
     try {
-      const L = await fetch(config.apiUrl + "/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON["stringify"]({
-          message: H,
-          session_id: sessionId,
-          site_id: config.siteId
-        })
-      }), M = await L["json"]();
-      typingRow["remove"](), appendMessage(M["answer"] || M["response"] || "Không nhận được phản hồi", "bot", M["sources"]), M["suggest_handoff"] && showHandoffSuggestion(M["handoff_reason"]);
+      const M = await streamBotResponse(H, typingRow);
+      M["suggest_handoff"] && showHandoffSuggestion(M["handoff_reason"]);
       if (config.leadCapture.captureTiming === "after_messages" && userMessageCount >= config.leadCapture.messagesBeforeCapture) {
         void showLeadCaptureForm("chat");
       }
@@ -1161,6 +1151,84 @@
       typingRow["remove"](), appendMessage("Xin lỗi, đã xảy ra lỗi. Vui lòng thử lại.", "bot");
     }
   });
+  async function streamBotResponse(G, H) {
+    const I = await fetch(config.apiUrl + "/api/chat/stream", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON["stringify"]({
+        message: G,
+        session_id: sessionId,
+        site_id: config.siteId
+      })
+    });
+    if (!I["ok"] || !I["body"]) {
+      const R = await I["json"]()["catch"](() => ({}));
+      throw new Error(R["detail"] || "Could not connect to stream.");
+    }
+
+    const J = I["body"]["getReader"]();
+    const K = new TextDecoder();
+    let L = "", M = "", N = null, O = null, P = {};
+
+    const Q = R => {
+      if (!R || R === "[DONE]") return;
+      let S = null;
+      try {
+        S = JSON["parse"](R);
+      } catch (T) {
+        S = { type: "chunk", content: R };
+      }
+      if (S["type"] === "error") throw new Error(S["message"] || "Stream error");
+      if (S["type"] === "replace") M = S["content"] || "";
+      if (S["type"] === "chunk") M += S["content"] || "";
+      if (S["type"] === "done") {
+        P = S;
+        M = S["answer"] || M;
+      }
+      if ((S["type"] === "chunk" || S["type"] === "replace" || S["type"] === "done") && M) {
+        if (!N) {
+          H["remove"]();
+          appendMessage(M, "bot", [], { persist: false, suppressPrompts: true });
+          N = messagesEl["querySelector"](".sitechat-message-wrapper.bot:last-child");
+          O = N ? N["querySelector"](".sitechat-message.bot") : null;
+        } else if (O) {
+          setBotMessageContent(O, M, S["type"] === "done" ? S["sources"] : []);
+          messagesEl["scrollTop"] = messagesEl["scrollHeight"];
+        }
+      }
+    };
+
+    while (true) {
+      const { value: R, done: S } = await J["read"]();
+      if (S) break;
+      L += K["decode"](R, { stream: true });
+      const T = L["split"]("\n\n");
+      L = T["pop"]() || "";
+      T["forEach"](U => {
+        const V = U["split"]("\n")
+          ["filter"](W => W["startsWith"]("data:"))
+          ["map"](W => W["replace"](/^data:\s?/, ""))
+          ["join"]("\n");
+        Q(V);
+      });
+    }
+    L && Q(L["replace"](/^data:\s?/, ""));
+    H["remove"]();
+    if (!N) appendMessage(M || "Không nhận được phản hồi", "bot", P["sources"]);
+    if (O) {
+      setBotMessageContent(O, M || "Không nhận được phản hồi", P["sources"]);
+      persistMessage(M, "bot", P["sources"], new Date()["toISOString"]());
+      if (config.quickPrompts.showAfterResponse) {
+        const R = document["createElement"]("div");
+        R["className"] = "sitechat-welcome-suggestions sitechat-after-response-prompts";
+        fillQuickPrompts(R);
+        if (R["childElementCount"]) messagesEl["appendChild"](R);
+      }
+    }
+    return P;
+  }
   function showHandoffSuggestion(G) {
     const H = document["createElement"]("div");
     H["className"] = "sitechat-handoff-suggestion", H["innerHTML"] = '\n      <p>Bạn có muốn trò chuyện với nhân viên tư vấn không?</p>\n      <div class="sitechat-handoff-suggestion-buttons">\n        <button class="sitechat-handoff-yes">Có, kết nối ngay</button>\n        <button class="sitechat-handoff-no">Không, cảm ơn</button>\n      </div>\n    ',
@@ -1184,11 +1252,12 @@
     M["className"] = "sitechat-message-content";
     const N = document["createElement"]("div");
     N["className"] = "sitechat-message " + H;
-    let O = G;
-    H === "bot" && (O = markdownToHtml(G));
-    let P = O;
-    config.showSources && I && I["length"] > 0 && (P += '\n        <div class="sitechat-sources">\n          <div class="sitechat-sources-label">\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>\n              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>\n            </svg>\n            Nguồn tham khảo\n          </div>\n          <div class="sitechat-sources-list">\n            ' + I["map"](R => '\n              <a href="' + R["url"] + '" target="_blank" class="sitechat-source-link" title="' + R["url"] + '">\n                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>\n                  <polyline points="15 3 21 3 21 9"/>\n                  <line x1="10" y1="14" x2="21" y2="3"/>\n                </svg>\n                ' + (R["title"] || "Nguồn") + "\n              </a>\n            ")["join"]("") + "\n          </div>\n        </div>\n      ");
-    N["innerHTML"] = P, M["appendChild"](N);
+    if (H === "bot") {
+      setBotMessageContent(N, G, I);
+    } else {
+      N["innerHTML"] = G;
+    }
+    M["appendChild"](N);
     const Q = document["createElement"]("div");
     const messageTime = options.timestamp ? new Date(options.timestamp) : new Date();
     Q["className"] = "sitechat-message-time", Q["textContent"] = messageTime["toLocaleTimeString"]([], {
@@ -1202,7 +1271,7 @@
     }
     K["appendChild"](L), K["appendChild"](M), messagesEl["appendChild"](K), messagesEl["scrollTop"] = messagesEl["scrollHeight"];
     if (H === "bot") setBotAvatar(L);
-    if (H === "bot" && config.quickPrompts.showAfterResponse) {
+    if (H === "bot" && config.quickPrompts.showAfterResponse && options.suppressPrompts !== true) {
       const promptRow = document["createElement"]("div");
       promptRow["className"] = "sitechat-welcome-suggestions sitechat-after-response-prompts";
       fillQuickPrompts(promptRow);
@@ -1211,6 +1280,11 @@
     if (options.persist !== false) {
       persistMessage(G, H, I, messageTime["toISOString"]());
     }
+  }
+  function setBotMessageContent(G, H, I = []) {
+    let J = markdownToHtml(H || "");
+    config.showSources && I && I["length"] > 0 && (J += '\n        <div class="sitechat-sources">\n          <div class="sitechat-sources-label">\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>\n              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>\n            </svg>\n            Nguồn tham khảo\n          </div>\n          <div class="sitechat-sources-list">\n            ' + I["map"](K => '\n              <a href="' + K["url"] + '" target="_blank" class="sitechat-source-link" title="' + K["url"] + '">\n                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>\n                  <polyline points="15 3 21 3 21 9"/>\n                  <line x1="10" y1="14" x2="21" y2="3"/>\n                </svg>\n                ' + (K["title"] || "Nguồn") + "\n              </a>\n            ")["join"]("") + "\n          </div>\n        </div>\n      ");
+    G["innerHTML"] = J;
   }
   function markdownToHtml(G) {
     let H = G["replace"](/\*\*(.*?)\*\*/g, "<strong>$1</strong>")["replace"](/`([^`]+)`/g, "<code>$1</code>")["split"]("\n\n")["map"](I => I["trim"]())["filter"](I => I)["map"](I => {

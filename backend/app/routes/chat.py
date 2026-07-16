@@ -1,6 +1,8 @@
 """
 Chat API routes.
 """
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from slowapi import Limiter
@@ -166,19 +168,28 @@ async def chat_stream(request: Request, body: ChatRequest):
 
         async def event_generator():
             try:
-                async for chunk in rag_engine.chat_stream(
+                async for event in rag_engine.chat_stream(
                     message=body.message,
                     session_id=body.session_id,
                     user_id=body.user_id,
                     site_id=body.site_id,
                 ):
-                    yield f"data: {chunk}\n\n"
-                if owner_id:
-                    await increment_usage(mongodb, owner_id, "messages")
-                    await record_model_usage(mongodb, owner_id, tenant_llm)
+                    if event.get("type") == "done":
+                        suggest_handoff, handoff_reason = await check_handoff_suggestion(
+                            body.site_id,
+                            event.get("answer", ""),
+                            float(event.get("confidence") or 0.0),
+                        )
+                        event["suggest_handoff"] = suggest_handoff
+                        event["handoff_reason"] = handoff_reason
+                        if owner_id:
+                            await increment_usage(mongodb, owner_id, "messages")
+                            await record_model_usage(mongodb, owner_id, tenant_llm)
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
             except Exception as e:
-                yield f"data: Error: {str(e)}\n\n"
+                event = {"type": "error", "message": str(e)}
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         
         return StreamingResponse(
             event_generator(),

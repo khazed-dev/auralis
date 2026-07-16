@@ -36,6 +36,7 @@ def clean_model_output(text: str) -> str:
 
     # Remove Qwen/Qwen3 reasoning blocks if any.
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<think>.*$", "", text, flags=re.DOTALL | re.IGNORECASE)
     text = text.replace("<think>", "").replace("</think>", "")
 
     # Remove common reasoning labels if they accidentally appear.
@@ -303,7 +304,7 @@ class RAGEngine:
         session_id: str,
         user_id: str = None,
         site_id: str = None,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[Dict, None]:
         """Stream a chat response (history + retrieval run in parallel)."""
         mongodb = await get_mongodb()
 
@@ -318,7 +319,43 @@ class RAGEngine:
                 site_behavior = (site.get("config") or {}).get("behavior") or {}
 
         try:
-            history = await mongodb.get_conversation_history(session_id, site_id=site_id)
+            history, qa_match = await asyncio.gather(
+                mongodb.get_conversation_history(session_id, site_id=site_id),
+                self._check_qa_match(message, site_id),
+            )
+
+            if qa_match:
+                qa_pair, qa_score = qa_match
+                answer = clean_model_output(qa_pair["answer"])
+                confidence = min(0.98, qa_score + 0.05)
+                sources = []
+
+                if answer:
+                    yield {"type": "chunk", "content": answer}
+
+                await mongodb.increment_qa_use_count(qa_pair["id"])
+                await mongodb.save_message(
+                    session_id=session_id,
+                    role="user",
+                    content=message,
+                    site_id=site_id,
+                )
+                await mongodb.save_message(
+                    session_id=session_id,
+                    role="assistant",
+                    content=answer,
+                    sources=[],
+                    site_id=site_id,
+                )
+                yield {
+                    "type": "done",
+                    "answer": answer,
+                    "sources": sources,
+                    "confidence": confidence,
+                    "session_id": session_id,
+                }
+                return
+
             rewritten_query = await self._rewrite_query(message, history)
             retrieved_docs = await self._retrieve_documents(
                 rewritten_query,
@@ -327,14 +364,21 @@ class RAGEngine:
             )
             relevant_docs = await self._grade_documents(rewritten_query, retrieved_docs)
             context, sources = self._build_context(relevant_docs)
+            if site_behavior.get("show_sources") is False:
+                sources = []
 
             prompt = self._build_prompt(message, context, history)
             system_prompt = self._get_system_prompt(
                 site_name,
                 site_behavior.get("system_prompt"),
             )
+            if user_id:
+                user_memory = await mongodb.get_user_memory(user_id)
+                if user_memory:
+                    system_prompt += f"\n\nUser preferences: {user_memory}"
 
             full_response = ""
+            emitted_response = ""
             async for chunk in self.llm.generate_stream(
                 prompt,
                 system_prompt,
@@ -342,10 +386,22 @@ class RAGEngine:
                 max_tokens=int(site_behavior.get("max_tokens", settings.LLM_MAX_TOKENS)),
             ):
                 full_response += chunk
+                cleaned_so_far = clean_model_output(full_response)
+                if cleaned_so_far.startswith(emitted_response):
+                    delta = cleaned_so_far[len(emitted_response):]
+                    if delta:
+                        emitted_response = cleaned_so_far
+                        yield {"type": "chunk", "content": delta}
 
             cleaned_response = clean_model_output(full_response)
-            if cleaned_response:
-                yield cleaned_response
+            if cleaned_response.startswith(emitted_response):
+                delta = cleaned_response[len(emitted_response):]
+                if delta:
+                    yield {"type": "chunk", "content": delta}
+            elif cleaned_response != emitted_response:
+                yield {"type": "replace", "content": cleaned_response}
+
+            confidence = self._calculate_confidence(relevant_docs)
 
             await mongodb.save_message(
                 session_id, "user", message, site_id=site_id
@@ -357,10 +413,17 @@ class RAGEngine:
                 sources=[s.dict() for s in sources],
                 site_id=site_id,
             )
+            yield {
+                "type": "done",
+                "answer": cleaned_response,
+                "sources": [s.dict() for s in sources],
+                "confidence": confidence,
+                "session_id": session_id,
+            }
             
         except Exception as e:
             logger.error(f"Streaming error: {e}")
-            yield f"\n\nError: {str(e)}"
+            yield {"type": "error", "message": str(e)}
     
     async def _rewrite_query(
         self,
