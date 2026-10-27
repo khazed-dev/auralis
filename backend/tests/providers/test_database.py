@@ -85,7 +85,7 @@ class TestMongoDBProviderConnection:
     @pytest.mark.asyncio
     async def test_provider_connect_success(self):
         """Test successful provider connection."""
-        with patch("motor.motor_asyncio.AsyncIOMotorClient") as mock_client:
+        with patch("app.providers.database.mongodb_provider.AsyncIOMotorClient") as mock_client:
             mock_instance = MagicMock()
             mock_instance.admin.command = AsyncMock(return_value={"ok": 1})
             mock_instance.__getitem__ = MagicMock(return_value=MagicMock())
@@ -98,8 +98,11 @@ class TestMongoDBProviderConnection:
             
             await provider.connect()
             
-            assert provider.client is not None
+            assert provider.client is mock_instance
             assert provider.db is not None
+            mock_client.assert_called_once()
+            mock_instance.admin.command.assert_awaited_once_with("ping")
+            provider._create_indexes.assert_awaited_once()
     
     @pytest.mark.asyncio
     async def test_provider_health_check_success(self):
