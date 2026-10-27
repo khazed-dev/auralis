@@ -179,7 +179,10 @@ class TestConversationOperations:
             response_time_ms=150
         )
         
-        mock_mongodb.db.conversations.update_one.assert_called_once()
+        calls = mock_mongodb.db.conversations.update_one.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[1]["$push"]["messages"]["sources"] == sources
+        assert calls[1].args[0] == {"session_id": "session123", "first_response_at": {"$exists": False}}
     
     @pytest.mark.asyncio
     async def test_get_conversation_history(self, mock_mongodb):

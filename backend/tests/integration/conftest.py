@@ -93,6 +93,7 @@ async def authenticated_app(
          patch("app.routes.auth.get_mongodb", get_mock_db), \
          patch("app.routes.embed.get_mongodb", get_mock_db), \
          patch("app.routes.chat.get_mongodb", get_mock_db), \
+         patch("app.routes.dependencies.get_mongodb", get_mock_db), \
          patch("app.routes.conversations.get_mongodb", get_mock_db), \
          patch("app.routes.handoff.get_mongodb", get_mock_db), \
          patch("app.routes.triggers.get_mongodb", get_mock_db), \
@@ -143,6 +144,7 @@ async def admin_authenticated_app(
          patch("app.routes.auth.get_mongodb", get_mock_db), \
          patch("app.routes.embed.get_mongodb", get_mock_db), \
          patch("app.routes.chat.get_mongodb", get_mock_db), \
+         patch("app.routes.dependencies.get_mongodb", get_mock_db), \
          patch("app.routes.conversations.get_mongodb", get_mock_db), \
          patch("app.routes.handoff.get_mongodb", get_mock_db), \
          patch("app.routes.triggers.get_mongodb", get_mock_db), \

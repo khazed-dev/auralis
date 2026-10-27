@@ -1,30 +1,18 @@
-"""Marketing landing and dashboard route serving."""
+"""Backend metadata and explicitly retired legacy UI routes."""
 
 import pytest
 
 
 @pytest.mark.asyncio
-async def test_root_serves_marketing_landing(client):
+async def test_root_serves_backend_metadata(client):
     r = await client.get("/")
     assert r.status_code == 200
-    assert "data-sitechat-landing" in r.text
-    assert "landing.css" in r.text
-    assert "__SITE_URL__" not in r.text
-    assert "__SITE_HOST__" not in r.text
+    assert r.json()["status"] == "running"
+    assert r.json()["widget"] == "/chatbot.js"
 
 
 @pytest.mark.asyncio
-async def test_app_serves_dashboard(client):
-    r = await client.get("/app")
-    assert r.status_code == 200
-    assert "data-sitechat-dashboard" in r.text
-    assert "styles.css" in r.text
-    assert "__SITE_URL__" not in r.text
-
-
-@pytest.mark.asyncio
-async def test_dashboard_alias_serves_dashboard(client):
-    r = await client.get("/dashboard")
-    assert r.status_code == 200
-    assert "data-sitechat-dashboard" in r.text
-    assert "__SITE_URL__" not in r.text
+@pytest.mark.parametrize("path", ["/app", "/dashboard", "/login", "/landing-neo", "/data"])
+async def test_legacy_ui_routes_are_retired(client, path):
+    r = await client.get(path)
+    assert r.status_code == 410

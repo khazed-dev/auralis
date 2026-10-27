@@ -11,8 +11,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 @pytest.fixture
-def sample_handoff_data():
+def sample_handoff_data(mock_database, sample_site):
     """Sample handoff data for testing."""
+    mock_database.seed_site(sample_site)
     return {
         "handoff_id": "handoff_001",
         "session_id": "session_123",
@@ -223,6 +224,7 @@ class TestHandoffMessages:
         }
         
         mock_mongodb.get_handoff_messages = AsyncMock(return_value=messages_response)
+        mock_mongodb.get_handoff_session = AsyncMock(return_value=sample_handoff_data)
         
         response = await client.get(f"/api/handoff/{sample_handoff_data['handoff_id']}/messages")
         
@@ -242,6 +244,7 @@ class TestHandoffMessages:
         }
         
         mock_mongodb.get_handoff_messages = AsyncMock(return_value=messages_response)
+        mock_mongodb.get_handoff_session = AsyncMock(return_value=sample_handoff_data)
         
         since = (datetime.utcnow() - timedelta(minutes=5)).isoformat()
         response = await client.get(

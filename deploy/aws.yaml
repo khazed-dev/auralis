@@ -1,0 +1,168 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Auralis staging deployment through GitHub OIDC, private S3 and SSM
+Parameters:
+  InstanceId:
+    Type: String
+    Default: i-0a87fb704efaa0ed2
+    AllowedPattern: '^i-[a-f0-9]+$'
+  ExistingOidcProviderArn:
+    Type: String
+    Default: ''
+    Description: Existing GitHub OIDC provider ARN, or empty to create it
+Conditions:
+  CreateOidcProvider: !Equals [!Ref ExistingOidcProviderArn, '']
+Resources:
+  GitHubOidc:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateOidcProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+  Artifacts:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireArtifacts
+            Status: Enabled
+            Prefix: auralis/
+            ExpirationInDays: 30
+  ArtifactPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Artifacts
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource: [!GetAtt Artifacts.Arn, !Sub '${Artifacts.Arn}/*']
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: ReadReleaseArtifacts
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub '${Artifacts.Arn}/auralis/*'
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If [CreateOidcProvider, !Ref GitHubOidc, !Ref ExistingOidcProviderArn]
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: repo:khazed-dev/auralis:environment:staging
+      Policies:
+        - PolicyName: DeployOneInstance
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub '${Artifacts.Arn}/auralis/*'
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource:
+                  - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/${InstanceId}'
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:document/${DeployDocument}'
+              - Effect: Allow
+                Action: [ssm:ListCommandInvocations, ssm:DescribeInstanceInformation]
+                Resource: '*'
+  DeployDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      Name: AuralisDeploy
+      DocumentType: Command
+      DocumentFormat: YAML
+      UpdateMethod: NewVersion
+      Content:
+        schemaVersion: '2.2'
+        description: Verify and deploy one Auralis release without changing data or TLS
+        parameters:
+          ArtifactUrl:
+            type: String
+            allowedPattern: !Sub '^https://${Artifacts}\.s3\.${AWS::Region}\.amazonaws\.com/auralis/[a-f0-9]{40}-[0-9]+-[0-9]+/release\.tgz$'
+          ArtifactSha256:
+            type: String
+            allowedPattern: '^[a-f0-9]{64}$'
+          Commit:
+            type: String
+            allowedPattern: '^[a-f0-9]{40}$'
+          ReleaseId:
+            type: String
+            allowedPattern: '^[a-f0-9]{40}-[0-9]+-[0-9]+$'
+        mainSteps:
+          - action: aws:runShellScript
+            name: prepare
+            inputs:
+              runCommand:
+                - 'set -eu'
+                - 'id auralis-deploy >/dev/null'
+                - 'install -d -m 755 -o root -g root /var/lib/auralis-deploy/incoming/{{ ReleaseId }}'
+          - action: aws:downloadContent
+            name: download
+            inputs:
+              sourceType: S3
+              sourceInfo:
+                path: '{{ ArtifactUrl }}'
+              destinationPath: '/var/lib/auralis-deploy/incoming/{{ ReleaseId }}'
+          - action: aws:runShellScript
+            name: deploy
+            inputs:
+              timeoutSeconds: '2700'
+              runCommand:
+                - 'set -eu'
+                - 'cd /var/lib/auralis-deploy/incoming/{{ ReleaseId }}'
+                - "printf '%s  release.tgz\n' '{{ ArtifactSha256 }}' | sha256sum -c -"
+                - 'chmod 444 release.tgz'
+                - 'install -d -m 755 -o auralis-deploy -g auralis-deploy script'
+                - 'runuser -u auralis-deploy -- tar -xzf release.tgz -C script deploy/deploy.sh --no-same-owner --no-same-permissions'
+                - 'runuser -u auralis-deploy -- bash script/deploy/deploy.sh /var/lib/auralis-deploy/incoming/{{ ReleaseId }}/release.tgz {{ Commit }} {{ ReleaseId }}'
+Outputs:
+  ArtifactBucket:
+    Value: !Ref Artifacts
+  GitHubDeployRoleArn:
+    Value: !GetAtt DeployRole.Arn
+  EC2InstanceProfileName:
+    Value: !Ref InstanceProfile
+  SsmDocumentName:
+    Value: !Ref DeployDocument

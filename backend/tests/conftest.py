@@ -57,6 +57,8 @@ def mock_database() -> MockDatabaseProvider:
     Tests against the abstract interface, not MongoDB-specific methods.
     """
     db = MockDatabaseProvider()
+    db.get_lead_by_session = AsyncMock(return_value=None)
+    db.bump_handoff_visitor_requeue_pending = AsyncMock(return_value=True)
     return db
 
 

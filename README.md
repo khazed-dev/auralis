@@ -132,7 +132,7 @@ npm install
 Tạo `web/.env.local`:
 
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api
 ```
 
 Sau đó chạy:
@@ -185,6 +185,8 @@ Trước khi cập nhật production, nên:
 6. Kiểm tra đăng nhập, danh sách website, crawl, chatbot và handoff.
 
 ## Triển khai production
+
+CI/CD trên AWS EC2 với GitHub Actions, AWS OIDC/SSM, release riêng và rollback được mô tả tại [docs/CI_CD_VI.md](docs/CI_CD_VI.md).
 
 Dự án hiện hỗ trợ mô hình triển khai self-hosted:
 

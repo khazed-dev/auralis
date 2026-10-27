@@ -13,12 +13,12 @@ class TestEmbedScriptEndpoints:
     """Tests for embed script generation endpoints."""
     
     @pytest.mark.asyncio
-    async def test_get_embed_script_success(self, client, mock_database, sample_site):
+    async def test_get_embed_script_success(self, authenticated_client, mock_database, sample_site):
         """Test getting embed script for a site."""
         # Seed the site using provider interface
         mock_database.seed_site(sample_site)
         
-        response = await client.get(
+        response = await authenticated_client.get(
             f"/api/embed/script/{sample_site['site_id']}"
         )
         
@@ -28,12 +28,12 @@ class TestEmbedScriptEndpoints:
         assert sample_site["site_id"] in data["embed_script"]
     
     @pytest.mark.asyncio
-    async def test_get_embed_script_with_sri(self, client, mock_database, sample_site):
+    async def test_get_embed_script_with_sri(self, authenticated_client, mock_database, sample_site):
         """Test embed script includes SRI hash when requested."""
         mock_database.seed_site(sample_site)
         
         with patch("app.routes.embed.get_widget_sri_hash", return_value="sha384-testhash123"):
-            response = await client.get(
+            response = await authenticated_client.get(
                 f"/api/embed/script/{sample_site['site_id']}?include_sri=true"
             )
         
@@ -44,11 +44,11 @@ class TestEmbedScriptEndpoints:
         assert "integrity" in data["embed_script"]
     
     @pytest.mark.asyncio
-    async def test_get_embed_script_without_sri(self, client, mock_database, sample_site):
+    async def test_get_embed_script_without_sri(self, authenticated_client, mock_database, sample_site):
         """Test embed script without SRI hash."""
         mock_database.seed_site(sample_site)
         
-        response = await client.get(
+        response = await authenticated_client.get(
             f"/api/embed/script/{sample_site['site_id']}?include_sri=false"
         )
         
@@ -57,24 +57,37 @@ class TestEmbedScriptEndpoints:
         assert "integrity" not in data["embed_script"]
     
     @pytest.mark.asyncio
-    async def test_get_embed_script_not_found(self, client, mock_database):
+    async def test_get_embed_script_not_found(self, authenticated_client, mock_database):
         """Test getting embed script for non-existent site."""
         # Don't seed any site
-        response = await client.get("/api/embed/script/nonexistent")
+        response = await authenticated_client.get("/api/embed/script/nonexistent")
         
         assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("endpoint", ["script", "security", "status"])
+    async def test_management_endpoints_require_auth(self, client, endpoint):
+        response = await client.get(f"/api/embed/{endpoint}/test123")
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("endpoint", ["script", "security", "status"])
+    async def test_management_endpoints_reject_other_owner(self, authenticated_client, mock_database, sample_site, endpoint):
+        mock_database.seed_site({**sample_site, "user_id": "another-owner"})
+        response = await authenticated_client.get(f"/api/embed/{endpoint}/{sample_site['site_id']}")
+        assert response.status_code == 403
 
 
 class TestEmbedSecurityEndpoints:
     """Tests for embed security info endpoints."""
     
     @pytest.mark.asyncio
-    async def test_get_security_info_success(self, client, mock_database, sample_site):
+    async def test_get_security_info_success(self, authenticated_client, mock_database, sample_site):
         """Test getting security info for a site."""
         mock_database.seed_site(sample_site)
         
         with patch("app.routes.embed.get_widget_sri_hash", return_value="sha384-testhash"):
-            response = await client.get(
+            response = await authenticated_client.get(
                 f"/api/embed/security/{sample_site['site_id']}"
             )
         
@@ -86,19 +99,20 @@ class TestEmbedSecurityEndpoints:
         assert "widget_url" in data
     
     @pytest.mark.asyncio
-    async def test_get_security_info_not_found(self, client, mock_database):
+    async def test_get_security_info_not_found(self, authenticated_client, mock_database):
         """Test getting security info for non-existent site."""
         # Don't seed any site
-        response = await client.get("/api/embed/security/nonexistent")
+        response = await authenticated_client.get("/api/embed/security/nonexistent")
         
         assert response.status_code == 404
     
     @pytest.mark.asyncio
-    async def test_security_info_includes_domain_config(self, client, mock_database):
+    async def test_security_info_includes_domain_config(self, authenticated_client, mock_database, sample_user):
         """Test that security info includes domain configuration."""
         site_with_domains = {
             "_id": "site_id",
             "site_id": "test123",
+            "user_id": sample_user["_id"],
             "name": "Test Site with Domains",
             "url": "https://example.com",
             "config": {
@@ -111,7 +125,7 @@ class TestEmbedSecurityEndpoints:
         mock_database.seed_site(site_with_domains)
         
         with patch("app.routes.embed.get_widget_sri_hash", return_value="sha384-hash"):
-            response = await client.get("/api/embed/security/test123")
+            response = await authenticated_client.get("/api/embed/security/test123")
         
         assert response.status_code == 200
         data = response.json()
@@ -123,7 +137,7 @@ class TestEmbedStatusEndpoints:
     """Tests for embed status endpoints."""
     
     @pytest.mark.asyncio
-    async def test_get_site_status_success(self, client, mock_database, sample_site):
+    async def test_get_site_status_success(self, authenticated_client, mock_database, sample_site):
         """Test getting site status."""
         mock_database.seed_site(sample_site)
         
@@ -136,7 +150,7 @@ class TestEmbedStatusEndpoints:
             pages_indexed=10
         )
         
-        response = await client.get(
+        response = await authenticated_client.get(
             f"/api/embed/status/{sample_site['site_id']}"
         )
         
@@ -146,20 +160,20 @@ class TestEmbedStatusEndpoints:
         assert "status" in data
     
     @pytest.mark.asyncio
-    async def test_get_site_status_not_found(self, client, mock_database):
+    async def test_get_site_status_not_found(self, authenticated_client, mock_database):
         """Test getting status for non-existent site."""
         # Don't seed any site
-        response = await client.get("/api/embed/status/nonexistent")
+        response = await authenticated_client.get("/api/embed/status/nonexistent")
         
         assert response.status_code == 404
     
     @pytest.mark.asyncio
-    async def test_get_site_status_pending_crawl(self, client, mock_database, sample_site):
+    async def test_get_site_status_pending_crawl(self, authenticated_client, mock_database, sample_site):
         """Test status when crawl is pending."""
         mock_database.seed_site(sample_site)
         # No crawl job created - should be pending
         
-        response = await client.get(
+        response = await authenticated_client.get(
             f"/api/embed/status/{sample_site['site_id']}"
         )
         
@@ -175,7 +189,9 @@ class TestSetupChatbotEndpoint:
     async def test_setup_chatbot_success(self, authenticated_client, mock_database):
         """Test successful chatbot setup."""
         # No site exists yet
-        with patch("app.routes.embed.crawl_and_index_site", new_callable=AsyncMock):
+        mock_database.create_scheduled_crawl_job = AsyncMock(return_value="test-setup-job")
+        queue = MagicMock(enqueue=AsyncMock())
+        with patch("app.routes.embed.get_crawl_queue", return_value=queue):
             response = await authenticated_client.post(
                 "/api/embed/setup",
                 json={
@@ -190,6 +206,7 @@ class TestSetupChatbotEndpoint:
         assert "site_id" in data
         assert "embed_script" in data
         assert data["status"] == "crawling"
+        queue.enqueue.assert_awaited_once()
     
     @pytest.mark.asyncio
     async def test_setup_chatbot_invalid_url(self, authenticated_client):

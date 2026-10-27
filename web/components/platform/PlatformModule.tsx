@@ -111,7 +111,10 @@ function CustomersView() {
     const result = await json<{ items: Customer[] }>(authFetch(`${API_BASE}/platform/customers?q=${encodeURIComponent(query)}`));
     setItems(result.items);
   }, [query]);
-  useEffect(() => { void load().catch(e => setError(e.message)); }, [load]);
+  useEffect(() => {
+    void json<{ items: Customer[] }>(authFetch(`${API_BASE}/platform/customers?q=${encodeURIComponent(query)}`))
+      .then(result => setItems(result.items)).catch(e => setError(e.message));
+  }, [query]);
   async function openCustomer(id: string) {
     try { setDetail(await json<Dict>(authFetch(`${API_BASE}/platform/customers/${id}`))); } catch (e) { setError((e as Error).message); }
   }

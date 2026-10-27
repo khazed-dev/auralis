@@ -512,8 +512,9 @@ class TestTriggerEvents:
         assert response.status_code == 200
     
     @pytest.mark.asyncio
-    async def test_log_trigger_event_invalid_type(self, client, sample_site, sample_trigger):
+    async def test_log_trigger_event_invalid_type(self, client, mock_database, sample_site, sample_trigger):
         """Test logging trigger event with invalid type fails."""
+        mock_database.seed_site(sample_site)
         response = await client.post(
             f"/api/widget/{sample_site['site_id']}/triggers/event",
             params={

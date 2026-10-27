@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { API_BASE, authFetch, DEV_AUTH_ENABLED } from "@/lib/auth";
 import { AppearanceConfig, SiteConfig } from "./types";
 
@@ -27,10 +27,7 @@ export function ChatbotLivePreview({
   const [messages, setMessages] = useState<PreviewMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  const sessionId = useMemo(
-    () => `dashboard-preview-${siteId}-${Date.now().toString(36)}`,
-    [siteId],
-  );
+  const session = useRef<{ siteId: string; id: string } | null>(null);
   const prompts = quickPrompts.enabled
     ? quickPrompts.prompts
         .filter((prompt) => prompt.enabled)
@@ -59,12 +56,15 @@ export function ChatbotLivePreview({
         ]);
         return;
       }
+      if (!session.current || session.current.siteId !== siteId) {
+        session.current = { siteId, id: `dashboard-preview-${siteId}-${crypto.randomUUID()}` };
+      }
       const response = await authFetch(`${API_BASE}/chat/preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message,
-          session_id: sessionId,
+          session_id: session.current.id,
           site_id: siteId,
         }),
       });

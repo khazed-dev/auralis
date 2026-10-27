@@ -26,9 +26,9 @@ export function PlatformShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    setCollapsed(localStorage.getItem("auralis-sidebar-collapsed") === "true");
     getCurrentUser()
       .then((current) => {
+        setCollapsed(localStorage.getItem("auralis-sidebar-collapsed") === "true");
         if (!current) return router.replace("/login");
         if (current.role !== "platform_admin") return router.replace("/dashboard");
         setUser(current);

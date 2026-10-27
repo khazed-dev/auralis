@@ -47,11 +47,10 @@ export function CheckoutPage() {
     const callbackOrder = params.get("order");
     if (!callbackOrder || order) return;
     const accessToken = window.sessionStorage.getItem(`auralis-payment:${callbackOrder}`);
-    if (!accessToken) {
-      setError("Không tìm thấy phiên thanh toán. Vui lòng kiểm tra email hoặc liên hệ hỗ trợ.");
-      return;
-    }
-    fetch(`${API_BASE}/checkout/orders/${callbackOrder}?access_token=${encodeURIComponent(accessToken)}`, { cache: "no-store" })
+    Promise.resolve().then(() => {
+      if (!accessToken) throw new Error("Không tìm thấy phiên thanh toán. Vui lòng kiểm tra email hoặc liên hệ hỗ trợ.");
+      return fetch(`${API_BASE}/checkout/orders/${callbackOrder}?access_token=${encodeURIComponent(accessToken)}`, { cache: "no-store" });
+    })
       .then(async response => {
         const contentType = response.headers.get("content-type") || "";
         const body = contentType.includes("application/json") ? await response.json() : null;
@@ -71,7 +70,7 @@ export function CheckoutPage() {
       setOrder(current => current ? { ...updated, access_token: current.access_token } : current);
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [order?.order_id, order?.status, order?.access_token]);
+  }, [order]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

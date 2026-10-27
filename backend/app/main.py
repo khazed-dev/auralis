@@ -43,6 +43,7 @@ from app.routes.qa import router as qa_router
 from app.routes.leads import router as leads_router
 from app.routes.messenger import router as messenger_router
 from app.routes.public_data import router as public_data_router
+from app.routes.readiness import router as readiness_router
 from app.services.auth import AuthService
 from app.services.scheduler import get_scheduler
 from app.services.crawl_queue import get_crawl_queue
@@ -233,6 +234,7 @@ app.include_router(schedule_router)
 app.include_router(qa_router)
 app.include_router(leads_router)
 app.include_router(messenger_router)
+app.include_router(readiness_router)
 if settings.ENABLE_PUBLIC_DATA_EXPLORER:
     app.include_router(public_data_router)
 # Serve the independently built embeddable widget.

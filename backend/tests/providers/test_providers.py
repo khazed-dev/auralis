@@ -58,6 +58,7 @@ class TestLLMFactory:
         mock_settings = MagicMock()
         mock_settings.LLM_PROVIDER = "openai"
         mock_settings.OPENAI_API_KEY = "test-api-key"
+        mock_settings.OPENAI_BASE_URL = None
         mock_settings.LLM_MODEL = "gpt-4"
         mock_settings.LLM_TEMPERATURE = 0.7
         mock_settings.LLM_MAX_TOKENS = 1000
@@ -73,6 +74,7 @@ class TestLLMFactory:
                 mock_chat.assert_called_once_with(
                     model="gpt-4",
                     api_key="test-api-key",
+                    base_url=None,
                     temperature=0.7,
                     max_tokens=1000
                 )
@@ -674,7 +676,7 @@ class TestProviderConfiguration:
         settings = Settings(
             JWT_SECRET="test-secret-key-minimum-32-chars-long"
         )
-        assert settings.EMBEDDINGS_MODEL == "all-MiniLM-L6-v2"
+        assert settings.EMBEDDINGS_MODEL == "BAAI/bge-m3"
     
     def test_settings_faiss_index_path_default(self):
         """Test default FAISS index path."""

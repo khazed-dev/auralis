@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   createDevSession,
   DEV_AUTH_ENABLED,
@@ -19,10 +19,10 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
 export function LoginForm() {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [email, setEmail] = useState("");
+  const emailInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setEmail(new URLSearchParams(window.location.search).get("email") ?? "");
+    if (emailInput.current) emailInput.current.value = new URLSearchParams(window.location.search).get("email") ?? "";
   }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -116,8 +116,7 @@ export function LoginForm() {
           id="login-email"
           name="email"
           type="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
+          ref={emailInput}
           placeholder="ten@congty.com"
           autoComplete="email"
           required
