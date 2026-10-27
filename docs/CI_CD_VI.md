@@ -1,6 +1,6 @@
 # CI/CD Auralis trên AWS EC2
 
-## Trạng thái đã xác minh ngày 27/10/2026
+## Trạng thái trước khi khởi tạo ngày 27/10/2026
 
 - Instance `i-0a87fb704efaa0ed2`, region `ap-southeast-1`, Elastic IP `52.76.1.25`.
 - Kernel đang chạy `6.17.0-1017-aws`; MongoDB ping thành công.
@@ -138,4 +138,16 @@ Giữ baseline và ít nhất hai release khỏe. Mỗi release có venv riêng,
 - Năm kịch bản deploy bằng mock chạy trên Ubuntu trong thư mục tạm: thành công, lỗi LLM, lỗi readiness, lỗi pip và MongoDB chưa sẵn sàng; xác nhận secrets/data sentinel còn nguyên và rollback khi cần.
 - CloudFormation đạt `cfn-lint 1.58.0`; các script Bash đạt kiểm tra cú pháp.
 - Trên EC2: `pip check` không có dependency hỏng; inference thực tế qua provider LLM mặc định đạt, không lưu hội thoại. Bốn service vẫn active sau kiểm tra.
-- Chưa chạy workflow trên GitHub, tạo stack AWS, gắn instance profile hoặc chuyển service sang release. Clean Linux CI và deploy SSM thật cần hoàn tất các bước khởi tạo phía trên.
+- Clean Linux CI đã đạt trên GitHub Actions sau khi sửa mock MongoDBProvider đúng nơi import, thay vì vô tình kết nối MongoDB local trong test.
+
+## Kết quả kích hoạt thực tế ngày 27/10/2026
+
+- Stack CloudFormation `auralis-ci-cd` đã được tạo; instance profile đã gắn vào EC2 và SSM kết nối thành công.
+- GitHub environment `staging` chỉ cho nhánh `staging`; đã cấu hình secret `AWS_DEPLOY_ROLE_ARN`, variable `ARTIFACT_BUCKET` và repository variable `DEPLOY_ENABLED=true`.
+- Lượt CI/CD đầu tiên hoàn tất cả backend, release và deploy: [GitHub Actions run 40505366925](https://github.com/khazed-dev/auralis/actions/runs/40505366925).
+- Commit ứng dụng đang chạy: `0f645bb4194e23800deaaa337da617de2ccd1fe9`; release `/opt/auralis/releases/0f645bb4194e23800deaaa337da617de2ccd1fe9-40505366925-1`.
+- Backup trước triển khai tại `/opt/backups/auralis-ci-cd/20261027T123440Z-513tiw4y` (chỉ user sở hữu truy cập). Đã restore thử **19 collection, 823 document** vào MongoDB tạm cổng `27018`, sau đó dừng MongoDB tạm. Archive backup và `verification.json` được giữ lại.
+- Đã kiểm tra các index FAISS trong backup, gồm index BGE-M3 đang dùng với **1.691 vector, 1.024 chiều**. Sau deploy, `.env`, FAISS và uploads khớp checksum với backup.
+- `/`, `/login`, `/chatbot.js`, `/api/ready` và ảnh tối ưu qua `/_next/image` đều trả 200. Readiness xác nhận MongoDB/FAISS và đúng commit.
+- LLM smoke đạt. Một yêu cầu chat qua API public đã trả lời với **3 nguồn**, lưu đủ **2 tin nhắn** trong session kiểm thử `ci-smoke-bde291743da245d09658d165a0868c43`.
+- Bốn service `mongod`, `sitechat`, `auralis-web`, `nginx` vẫn active. Từ đây, push/merge thay đổi vào `staging` sẽ tự chạy CI/CD; bộ E2E trình duyệt đầy đủ vẫn chưa được chạy.
