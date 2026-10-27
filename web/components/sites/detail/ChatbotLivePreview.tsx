@@ -4,6 +4,7 @@ import Image from "next/image";
 import { FormEvent, useRef, useState } from "react";
 import { API_BASE, authFetch, DEV_AUTH_ENABLED } from "@/lib/auth";
 import { AppearanceConfig, SiteConfig } from "./types";
+import styles from "./preview.module.css";
 
 type PreviewMessage = {
   role: "user" | "assistant";
@@ -105,7 +106,7 @@ export function ChatbotLivePreview({
   }
 
   return (
-    <aside className="chatbot-preview-pane">
+    <aside className={`${styles.preview} chatbot-preview-pane`} style={{ "--preview-accent": appearance.primary_color } as React.CSSProperties}>
       <header>
         <div>
           <strong>Live Demo</strong>

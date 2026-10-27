@@ -1,0 +1,17 @@
+:root {
+  --auralis-night: #081721;
+  --auralis-panel: #10232f;
+  --auralis-cyan: #62e6d0;
+  --auralis-ink: #142934;
+  --auralis-muted: #62727b;
+  --auralis-paper: #f6f9fa;
+  --auralis-white: #ffffff;
+  --auralis-line: #dce5e8;
+  --auralis-tint: #eaf5f2;
+  --auralis-action: #126a60;
+  --auralis-danger: #b83939;
+  --auralis-warning: #8b5e18;
+  --auralis-radius-control: 8px;
+  --auralis-radius-panel: 14px;
+  --auralis-shadow-dialog: 0 24px 80px rgb(8 23 33 / 20%);
+}
