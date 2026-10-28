@@ -66,6 +66,9 @@ class MockDatabaseProvider(BaseDatabaseProvider):
         metadata: Optional[Dict] = None
     ) -> None:
         """Save a message to conversation history."""
+        existing = self._conversations.get(session_id)
+        if existing and site_id and existing.get("site_id") != site_id:
+            raise ValueError("Session is not available for this site")
         now = datetime.utcnow()
         message = {
             "role": role,
@@ -190,6 +193,17 @@ class MockDatabaseProvider(BaseDatabaseProvider):
                 del self._conversations[sid]
                 count += 1
         return count
+
+    async def get_all_sessions(self, limit: int = 50, site_ids: Optional[List[str]] = None) -> List[Dict]:
+        conversations = [
+            conv for conv in self._conversations.values()
+            if site_ids is None or conv.get("site_id") in site_ids
+        ]
+        conversations.sort(key=lambda conv: conv.get("updated_at") or datetime.min, reverse=True)
+        return [
+            {key: conv.get(key) for key in ("session_id", "created_at", "updated_at")}
+            for conv in conversations[:limit]
+        ]
     
     # ===========================================
     # Site Operations
@@ -310,11 +324,24 @@ class MockDatabaseProvider(BaseDatabaseProvider):
                 return {**user, "_id": user_id}
         return None
     
-    async def update_user(self, user_id: str, updates: Dict) -> bool:
+    async def update_user(
+        self, user_id: str, updates: Dict, *, revoke_sessions: bool = False,
+        expected: Optional[Dict] = None,
+    ) -> bool:
         user = self._users.get(user_id)
         if not user:
             return False
+        for key, value in (expected or {}).items():
+            if isinstance(value, dict) and "$exists" in value:
+                if (key in user) != bool(value["$exists"]):
+                    return False
+            elif user.get(key) != value:
+                return False
         user.update(updates)
+        if revoke_sessions:
+            user["token_version"] = int(user.get("token_version") or 0) + 1
+            user.pop("refresh_token_hash", None)
+            user.pop("refresh_expires_at", None)
         user["updated_at"] = datetime.utcnow()
         return True
     

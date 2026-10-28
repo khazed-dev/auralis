@@ -9,7 +9,9 @@ from typing import Optional, List
 from loguru import logger
 from datetime import datetime
 import hashlib
+import ipaddress
 import json
+import re
 from urllib.parse import urlparse
 
 from app.config import settings
@@ -77,35 +79,66 @@ def get_widget_sri_hash() -> Optional[str]:
         return None
 
 
-def get_embed_url(request: Optional[Request] = None) -> str:
-    """Get the base URL for embed scripts."""
-    # SITE_URL must be one public origin, not the comma-separated CORS list.
-    configured = (settings.SITE_URL or "").rstrip("/")
-    parsed = urlparse(configured)
-    if (
-        configured
-        and "," not in configured
-        and parsed.scheme in {"http", "https"}
-        and bool(parsed.netloc)
-    ):
-        return configured
+def _validated_origin(value: str) -> Optional[str]:
+    if not value or any(char.isspace() or char in "\\<>\"'`," for char in value):
+        return None
+    try:
+        parsed = urlparse(value)
+        host = parsed.hostname
+        if (parsed.scheme not in {"http", "https"} or not host
+                or parsed.username is not None or parsed.password is not None
+                or parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment
+                or parsed.netloc.endswith(":")):
+            return None
+        port = parsed.port
+        if port is not None and not 1 <= port <= 65535:
+            return None
+        if ":" in host:
+            host = f"[{ipaddress.IPv6Address(host)}]"
+        else:
+            host = host.encode("idna").decode("ascii").lower()
+            if not all(re.fullmatch(r"(?!-)[a-z0-9-]{1,63}(?<!-)", label) for label in host.rstrip(".").split(".")):
+                return None
+        return f"{parsed.scheme}://{host}" + (f":{port}" if port is not None else "")
+    except (ValueError, UnicodeError):
+        return None
 
+
+def get_embed_url(request: Optional[Request] = None) -> str:
+    """Use a configured origin; raw forwarded headers never determine executable asset URLs."""
+    configured = _validated_origin(settings.SITE_URL or "")
+    if configured:
+        return configured
+    if settings.is_production:
+        raise HTTPException(status_code=503, detail="A valid SITE_URL origin must be configured")
     if request:
-        if configured:
-            logger.warning(
-                "Ignoring invalid SITE_URL=%r; deriving the public URL from the request",
-                configured,
-            )
-        # Reverse proxies should forward these headers to preserve the public origin.
-        scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-        host = request.headers.get("x-forwarded-host", request.url.netloc)
-        # Only use the first value if a proxy appended forwarding metadata.
-        scheme = scheme.split(",", 1)[0].strip()
-        host = host.split(",", 1)[0].strip()
-        return f"{scheme}://{host}"
-    
-    # Fallback for development
+        origin = _validated_origin(f"{request.url.scheme}://{request.url.netloc}")
+        if origin:
+            return origin
+        raise HTTPException(status_code=400, detail="Invalid request origin")
     return "http://localhost:8000"
+
+
+def _script_literal(value: str) -> str:
+    # JSON quotes JavaScript values; escaping HTML delimiters prevents </script> termination.
+    return json.dumps(value, ensure_ascii=True).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+
+def _embed_script(api_url: str, site_id: str, sri_hash: Optional[str] = None) -> str:
+    lines = [
+        "<!-- Auralis AI Widget -->", "<script>", "(function() {",
+        "  var s = document.createElement('script');",
+        f"  s.src = {_script_literal(api_url + '/chatbot.js')};",
+        "  s.async = true;",
+    ]
+    if sri_hash:
+        lines.extend([f"  s.integrity = {_script_literal(sri_hash)};", "  s.crossOrigin = 'anonymous';"])
+    lines.extend([
+        f"  s.dataset.siteId = {_script_literal(site_id)};",
+        f"  s.dataset.apiUrl = {_script_literal(api_url)};",
+        "  document.head.appendChild(s);", "})();", "</script>",
+    ])
+    return "\n".join(lines)
 
 
 async def crawl_and_index_site(url: str, site_id: str, max_pages: int = 50):
@@ -173,6 +206,8 @@ async def setup_chatbot(
             detail="Support agents cannot create or register sites",
         )
 
+    api_url = get_embed_url(http_request)
+
     url = str(request.url).rstrip("/")
     site_id = generate_site_id(url)
     site_name = request.name or url.replace("https://", "").replace("http://", "").split("/")[0]
@@ -229,20 +264,9 @@ async def setup_chatbot(
         "exclude_patterns": [],
     })
     
-    api_url = get_embed_url(http_request)
     # The widget URL is mutable, so SRI must not be included by default.
     # SRI is only safe with immutable/versioned asset URLs.
-    embed_script = f'''<!-- Auralis AI Widget -->
-<script>
-(function() {{
-  var s = document.createElement('script');
-  s.src = '{api_url}/chatbot.js';
-  s.async = true;
-  s.dataset.siteId = '{site_id}';
-  s.dataset.apiUrl = '{api_url}';
-  document.head.appendChild(s);
-}})();
-</script>'''
+    embed_script = _embed_script(api_url, site_id)
     
     return SetupResponse(
         site_id=site_id,
@@ -304,33 +328,7 @@ async def get_embed_script(
     api_url = get_embed_url(request)
     sri_hash = get_widget_sri_hash() if include_sri else None
     
-    # Generate embed script with optional SRI
-    if sri_hash:
-        embed_script = f'''<!-- Auralis AI Widget (Secure) -->
-<script>
-(function() {{
-  var s = document.createElement('script');
-  s.src = '{api_url}/chatbot.js';
-  s.async = true;
-  s.integrity = '{sri_hash}';
-  s.crossOrigin = 'anonymous';
-  s.dataset.siteId = '{site_id}';
-  s.dataset.apiUrl = '{api_url}';
-  document.head.appendChild(s);
-}})();
-</script>'''
-    else:
-        embed_script = f'''<!-- Auralis AI Widget -->
-<script>
-(function() {{
-  var s = document.createElement('script');
-  s.src = '{api_url}/chatbot.js';
-  s.async = true;
-  s.dataset.siteId = '{site_id}';
-  s.dataset.apiUrl = '{api_url}';
-  document.head.appendChild(s);
-}})();
-</script>'''
+    embed_script = _embed_script(api_url, site_id, sri_hash)
     
     return {
         "embed_script": embed_script,

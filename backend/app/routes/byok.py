@@ -1,16 +1,15 @@
 """Tenant BYOK configuration APIs for Custom subscriptions."""
 from datetime import datetime, timezone
-import ipaddress
 from typing import Literal, Optional
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.database import get_mongodb
 from app.routes.auth import require_auth
 from app.services.byok import (
     PROVIDERS, encrypt_secret, get_byok_config, require_custom_plan,
+    validate_byok_base_url, check_byok_endpoint,
 )
 from app.services.subscriptions import resolve_owner_id
 
@@ -29,24 +28,11 @@ class ByokUpdate(BaseModel):
     def clean_model(cls, value: str):
         return value.strip()
 
-    @field_validator("base_url")
-    @classmethod
-    def validate_base_url(cls, value: Optional[str]):
-        if not value:
-            return None
-        parsed = urlparse(value)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("Base URL must be an absolute HTTP(S) URL")
-        if parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
-            raise ValueError("Non-local BYOK endpoints must use HTTPS")
-        try:
-            address = ipaddress.ip_address(parsed.hostname or "")
-            if (address.is_private or address.is_link_local or address.is_loopback) and parsed.hostname not in {"127.0.0.1", "::1"}:
-                raise ValueError("Private network BYOK endpoints are not allowed")
-        except ValueError as exc:
-            if "not allowed" in str(exc):
-                raise
-        return value.rstrip("/")
+    @model_validator(mode="after")
+    def validate_base_url(self):
+        if self.base_url:
+            self.base_url = validate_byok_base_url(self.provider, self.base_url)
+        return self
 
 
 def public_config(config: Optional[dict]) -> dict:
@@ -79,6 +65,8 @@ async def update_byok(update: ByokUpdate, user: dict = Depends(require_auth)):
     db = await get_mongodb()
     owner_id = str(user["_id"])
     await require_custom_plan(db, owner_id)
+    base_url = update.base_url or PROVIDERS[update.provider]["default_base_url"]
+    await check_byok_endpoint(update.provider, base_url)
     existing = await db.db.byok_configs.find_one({"owner_id": owner_id}) or {}
     requires_key = PROVIDERS[update.provider]["requires_key"]
     encrypted = existing.get("api_key_encrypted")
@@ -91,7 +79,7 @@ async def update_byok(update: ByokUpdate, user: dict = Depends(require_auth)):
         "owner_id": owner_id,
         "provider": update.provider,
         "model": update.model,
-        "base_url": update.base_url or PROVIDERS[update.provider]["default_base_url"],
+        "base_url": base_url,
         "api_key_encrypted": encrypted,
         "enabled": update.enabled,
         "updated_at": now,

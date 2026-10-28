@@ -164,8 +164,11 @@ class MongoDBProvider(BaseDatabaseProvider):
         if site_id:
             update_set["site_id"] = site_id
         
+        query = {"session_id": session_id}
+        if site_id:
+            query["site_id"] = site_id
         await self.db.conversations.update_one(
-            {"session_id": session_id},
+            query,
             {
                 "$push": {"messages": message},
                 "$set": update_set,
@@ -268,6 +271,13 @@ class MongoDBProvider(BaseDatabaseProvider):
         }
         
         return conv
+
+    async def get_all_sessions(self, limit: int = 50, site_ids: Optional[List[str]] = None) -> List[Dict]:
+        query = {} if site_ids is None else {"site_id": {"$in": site_ids}}
+        cursor = self.db.conversations.find(
+            query, {"session_id": 1, "created_at": 1, "updated_at": 1}
+        ).sort("updated_at", -1).limit(limit)
+        return await cursor.to_list(length=limit)
     
     async def delete_conversations_bulk(self, session_ids: List[str]) -> int:
         """Delete multiple conversations."""
@@ -367,9 +377,30 @@ class MongoDBProvider(BaseDatabaseProvider):
     async def get_user_by_id(self, user_id: str) -> Optional[Dict]:
         """Get user by ID."""
         user = await self.db.users.find_one({"user_id": user_id})
+        if not user:
+            from bson import ObjectId
+            if ObjectId.is_valid(user_id):
+                user = await self.db.users.find_one({"_id": ObjectId(user_id)})
         if user:
             user["_id"] = str(user["_id"])
         return user
+
+    async def update_user(
+        self, user_id: str, updates: Dict, *, revoke_sessions: bool = False,
+        expected: Optional[Dict] = None,
+    ) -> bool:
+        from bson import ObjectId
+        user = await self.get_user_by_id(user_id)
+        if not user:
+            return False
+        identity = ObjectId(user["_id"]) if ObjectId.is_valid(user["_id"]) else user["_id"]
+        query = {"_id": identity, **(expected or {})}
+        operation = {"$set": {**updates, "updated_at": datetime.utcnow()}}
+        if revoke_sessions:
+            operation["$inc"] = {"token_version": 1}
+            operation["$unset"] = {"refresh_token_hash": "", "refresh_expires_at": ""}
+        result = await self.db.users.update_one(query, operation)
+        return result.matched_count > 0
 
     async def get_user_by_refresh_hash(self, token_hash: str) -> Optional[Dict]:
         user = await self.db.users.find_one({"refresh_token_hash": token_hash})

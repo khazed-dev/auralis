@@ -5,6 +5,9 @@ Supports: PDF, DOCX, TXT, Markdown, CSV, PPTX, XLSX, HTML
 import os
 import re
 import tempfile
+import asyncio
+import io
+import zipfile
 from typing import Dict, Optional, List
 from datetime import datetime
 from loguru import logger
@@ -39,6 +42,11 @@ class DocumentProcessor:
     }
     
     MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+    MAX_FILES_PER_UPLOAD = 20
+    MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
+    MAX_ARCHIVE_MEMBERS = 2000
+    MAX_EXTRACTED_CHARS = 10 * 1024 * 1024
+    MAX_EXTRACTED_DOCUMENTS = 5000
     
     def __init__(self):
         pass
@@ -59,6 +67,16 @@ class DocumentProcessor:
         file_content: bytes,
         filename: str,
         mime_type: Optional[str] = None
+    ) -> Dict:
+        # Parsing may decompress files and perform CPU-heavy synchronous work.
+        # The worker thread keeps it off the event loop; this is not a CPU sandbox.
+        return await asyncio.to_thread(self._process_file, file_content, filename, mime_type)
+
+    def _process_file(
+        self,
+        file_content: bytes,
+        filename: str,
+        mime_type: Optional[str] = None,
     ) -> Dict:
         """
         Process a file and extract text content using LangChain loaders.
@@ -90,6 +108,10 @@ class DocumentProcessor:
         # Create temp file for LangChain loaders (they need file paths)
         temp_file = None
         try:
+            if ext in {".docx", ".pptx", ".xlsx"} or (
+                ext == ".doc" and zipfile.is_zipfile(io.BytesIO(file_content))
+            ):
+                self._validate_archive(file_content)
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
             temp_file.write(file_content)
             temp_file.close()
@@ -106,6 +128,8 @@ class DocumentProcessor:
             
             # Load documents
             documents = loader.load()
+            if len(documents) > self.MAX_EXTRACTED_DOCUMENTS:
+                raise ValueError("Document contains too many sections")
             
             # Combine all document content
             text = self._combine_documents(documents)
@@ -140,6 +164,16 @@ class DocumentProcessor:
                     os.unlink(temp_file.name)
                 except Exception:
                     pass
+
+    def _validate_archive(self, content: bytes) -> None:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            members = archive.infolist()
+            if len(members) > self.MAX_ARCHIVE_MEMBERS:
+                raise ValueError("Document archive contains too many entries")
+            if sum(member.file_size for member in members) > self.MAX_ARCHIVE_BYTES:
+                raise ValueError("Expanded document archive is too large")
+            if any(member.flag_bits & 1 for member in members):
+                raise ValueError("Encrypted document archives are not supported")
     
     def _get_loader(self, file_path: str, ext: str):
         """Get the appropriate LangChain loader for the file type."""
@@ -171,8 +205,12 @@ class DocumentProcessor:
     def _combine_documents(self, documents: List[Document]) -> str:
         """Combine multiple LangChain documents into single text."""
         text_parts = []
+        total_chars = 0
         
         for i, doc in enumerate(documents):
+            total_chars += len(doc.page_content)
+            if total_chars > self.MAX_EXTRACTED_CHARS:
+                raise ValueError("Extracted document text is too large")
             content = doc.page_content.strip()
             if content:
                 # Add page/section marker if multiple documents

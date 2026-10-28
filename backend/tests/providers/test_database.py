@@ -155,7 +155,7 @@ class TestConversationOperations:
         mock_mongodb.db.conversations.update_one.assert_called_once()
         
         call_args = mock_mongodb.db.conversations.update_one.call_args
-        assert call_args[0][0] == {"session_id": "session123"}
+        assert call_args[0][0] == {"session_id": "session123", "site_id": "site456"}
         assert "$push" in call_args[0][1]
         assert "$set" in call_args[0][1]
     

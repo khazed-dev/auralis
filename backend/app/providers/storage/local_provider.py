@@ -3,7 +3,7 @@ Local filesystem storage provider implementation.
 """
 import os
 import aiofiles
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import BinaryIO, List, Optional
 from loguru import logger
 
@@ -15,7 +15,7 @@ class LocalStorageProvider(BaseStorageProvider):
     """Local filesystem storage implementation."""
     
     def __init__(self, base_path: Optional[str] = None):
-        self.base_path = Path(base_path or settings.LOCAL_STORAGE_PATH)
+        self.base_path = Path(base_path or settings.LOCAL_STORAGE_PATH).resolve()
         self._ensure_base_path()
     
     def _ensure_base_path(self):
@@ -23,8 +23,17 @@ class LocalStorageProvider(BaseStorageProvider):
         self.base_path.mkdir(parents=True, exist_ok=True)
     
     def _get_full_path(self, key: str) -> Path:
-        """Get the full filesystem path for a key."""
-        return self.base_path / key
+        """Resolve all operations inside the configured root, including symlinks."""
+        if (
+            not key or "\x00" in key or "\\" in key
+            or Path(key).is_absolute() or PureWindowsPath(key).drive
+            or ".." in Path(key).parts
+        ):
+            raise ValueError("Storage key must be a relative path inside the storage directory")
+        path = (self.base_path / key).resolve()
+        if path == self.base_path or not path.is_relative_to(self.base_path):
+            raise ValueError("Storage key escapes the storage directory")
+        return path
     
     async def upload(
         self,
@@ -35,13 +44,14 @@ class LocalStorageProvider(BaseStorageProvider):
     ) -> StorageFile:
         """Upload a file to local storage."""
         if folder:
-            folder_path = self.base_path / folder
-            folder_path.mkdir(parents=True, exist_ok=True)
+            folder_path = self._get_full_path(folder)
             key = f"{folder}/{filename}"
         else:
             key = filename
         
         full_path = self._get_full_path(key)
+        if folder:
+            folder_path.mkdir(parents=True, exist_ok=True)
         
         content = file.read() if hasattr(file, 'read') else file
         if isinstance(content, str):
@@ -94,15 +104,19 @@ class LocalStorageProvider(BaseStorageProvider):
     
     async def list_files(self, folder: str = "") -> List[StorageFile]:
         """List files in a folder."""
-        folder_path = self.base_path / folder if folder else self.base_path
+        folder_path = self._get_full_path(folder) if folder else self.base_path
         
         if not folder_path.exists():
             return []
         
         files = []
         for path in folder_path.iterdir():
+            try:
+                self._get_full_path(path.relative_to(self.base_path).as_posix())
+            except ValueError:
+                continue
             if path.is_file():
-                key = str(path.relative_to(self.base_path))
+                key = path.relative_to(self.base_path).as_posix()
                 files.append(StorageFile(
                     key=key,
                     filename=path.name,

@@ -45,11 +45,33 @@
   const embedApi =
     embedFallback && embedFallback.apiUrl != null ? String(embedFallback.apiUrl).trim() : "";
 
+  function safeHttpUrl(value) {
+    if (typeof value !== "string" || !value.trim() || /[\u0000-\u001f\u007f]/.test(value)) return null;
+    try {
+      const url = new URL(value, window.location.href);
+      if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return null;
+      return url.href;
+    } catch (error) { return null; }
+  }
+
+  function normalizeApiBase(value) {
+    const safe = safeHttpUrl(value);
+    if (!safe) return null;
+    if (safe.includes("?") || safe.includes("#")) return null;
+    return safe.replace(/\/+$/, "");
+  }
+
+  function safeHexColor(value, fallback = "#3366cc") {
+    if (typeof value !== "string" || !/^#(?:[a-f\d]{3}|[a-f\d]{6})$/i.test(value)) return fallback;
+    const hex = value.slice(1).toLowerCase();
+    return "#" + (hex.length === 3 ? hex.split("").map(char => char + char).join("") : hex);
+  }
+
   const config = {
     siteId: scriptEl?.dataset?.siteId || embedFallback?.siteId || "default",
-    apiUrl: datasetApi || embedApi || defaultEmbedApiUrl(),
+    apiUrl: normalizeApiBase(datasetApi || embedApi) || normalizeApiBase(defaultEmbedApiUrl()),
     position: scriptEl?.dataset?.position || "bottom-right",
-    primaryColor: scriptEl?.dataset?.primaryColor || "#3366cc",
+    primaryColor: safeHexColor(scriptEl?.dataset?.primaryColor),
     title: scriptEl?.dataset?.title || "Ask AI",
     welcomeMessage: "Bạn đang cần tìm sản phẩm hoặc tư vấn giải pháp nào?",
     botAvatarUrl: null,
@@ -130,8 +152,8 @@
       const G = await fetch(config.apiUrl + "/api/sites/" + config.siteId + "/config");
       if (G["ok"]) {
         const H = await G["json"]();
-        H["appearance"] && (config.primaryColor = H["appearance"]["primary_color"] || config.primaryColor, config.title = H["appearance"]["chat_title"] || config.title,
-          config.welcomeMessage = H["appearance"]["welcome_message"] || config.welcomeMessage, config.botAvatarUrl = H["appearance"]["bot_avatar_url"] || null,
+        H["appearance"] && (config.primaryColor = safeHexColor(H["appearance"]["primary_color"], config.primaryColor), config.title = H["appearance"]["chat_title"] || config.title,
+          config.welcomeMessage = H["appearance"]["welcome_message"] || config.welcomeMessage, config.botAvatarUrl = safeHttpUrl(H["appearance"]["bot_avatar_url"]),
           config.position = H["appearance"]["position"] || config.position,
           config.hideBranding = H["appearance"]["hide_branding"] === true, config.customBrandingText = H["appearance"]["custom_branding_text"] || null,
           config.customBrandingUrl = H["appearance"]["custom_branding_url"] || null), H["behavior"] && (config.showSources = H["behavior"]["show_sources"] !== false);
@@ -161,6 +183,7 @@
     }
   }
   function injectDynamicThemeStyles() {
+    config.primaryColor = safeHexColor(config.primaryColor);
     const G = document["getElementById"]("sitechat-dynamic-styles");
     G && G["remove"]();
     const H = document["createElement"]("style");
@@ -285,8 +308,10 @@
   }
   function setBotAvatar(element) {
     if (!element || !config.botAvatarUrl) return;
+    const avatarUrl = safeHttpUrl(config.botAvatarUrl);
+    if (!avatarUrl) return;
     const image = document["createElement"]("img");
-    image["src"] = config.botAvatarUrl;
+    image["src"] = avatarUrl;
     image["alt"] = "";
     Object["assign"](image["style"], {
       width: "100%",
@@ -324,8 +349,14 @@
     if (!G) return;
     const H = G["querySelector"]("a");
     if (config.hideBranding) {
-      config.customBrandingText ? (G["style"]["display"] = "block", H && (H["innerHTML"] = config.customBrandingText, config.customBrandingUrl ? (H["href"] = config.customBrandingUrl,
-        H["style"]["cursor"] = "pointer") : (H["removeAttribute"]("href"), H["style"]["cursor"] = "default"))) : G["style"]["display"] = "none";
+      G["style"]["display"] = config.customBrandingText ? "block" : "none";
+      if (H && config.customBrandingText) {
+        H["textContent"] = config.customBrandingText;
+        const url = safeHttpUrl(config.customBrandingUrl);
+        if (url) H["href"] = url;
+        else H["removeAttribute"]("href");
+        H["style"]["cursor"] = url ? "pointer" : "default";
+      }
       return;
     }
     G["style"]["display"] = "block", H && (H["innerHTML"] = "Powered by <strong>SiteChat</strong>", H["href"] = config.apiUrl,
@@ -548,8 +579,9 @@
       });
   }
   function escapeHtml(G) {
-    const H = document["createElement"]("div");
-    return H["textContent"] = G, H["innerHTML"];
+    return String(G ?? "").replace(/[&<>"']/g, char => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    })[char]);
   }
 
   // --- Human handoff + agent polling ---
@@ -654,7 +686,7 @@
     addAgentMessage(G, H) {
       H = H || "Nhân viên";
       const I = document["createElement"]("div");
-      I["className"] = "sitechat-message-wrapper bot agent", I["innerHTML"] = '\n        <div class="sitechat-avatar bot agent">\n          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>\n            <circle cx="12" cy="7" r="4"/>\n          </svg>\n        </div>\n        <div class="sitechat-message-content">\n          <div class="sitechat-message bot">' + escapeHtml(G) + '</div>\n          <div class="sitechat-message-time">' + (H || "Agent") + " · " + (new Date)["toLocaleTimeString"]([], {
+      I["className"] = "sitechat-message-wrapper bot agent", I["innerHTML"] = '\n        <div class="sitechat-avatar bot agent">\n          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>\n            <circle cx="12" cy="7" r="4"/>\n          </svg>\n        </div>\n        <div class="sitechat-message-content">\n          <div class="sitechat-message bot">' + escapeHtml(G) + '</div>\n          <div class="sitechat-message-time">' + escapeHtml(H || "Agent") + " · " + (new Date)["toLocaleTimeString"]([], {
         hour: "2-digit",
         minute: "2-digit"
       }) + "</div>\n        </div>\n      ", messagesEl["appendChild"](I), messagesEl["scrollTop"] = messagesEl["scrollHeight"];
@@ -769,7 +801,7 @@
   `;
   document["head"]["appendChild"](leadCaptureStyleEl);
   const widgetRoot = document["createElement"]("div");
-  widgetRoot["className"] = "sitechat-widget", widgetRoot["innerHTML"] = '\n    <button class="sitechat-toggle" aria-label="Toggle chat">\n      <svg class="sitechat-icon-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n        <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2v10z"/>\n      </svg>\n      <svg class="sitechat-icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n        <line x1="18" y1="6" x2="6" y2="18"/>\n        <line x1="6" y1="6" x2="18" y2="18"/>\n      </svg>\n    </button>\n    \n    <div class="sitechat-window">\n      <div class="sitechat-header">\n        <div class="sitechat-header-icon">\n          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n            <path d="M12 2L2 7l10 5 10-5-10-5z"/>\n            <path d="M2 17l10 5 10-5"/>\n            <path d="M2 12l10 5 10-5"/>\n          </svg>\n        </div>\n        <div class="sitechat-header-text">\n          <h3>' + config.title + '</h3>\n          <p>Powered by AI</p>\n        </div>\n        <div class="sitechat-header-actions" style="display:flex;align-items:center;gap:8px;flex-shrink:0;">\n          <button type="button" class="sitechat-handoff-btn" title="Talk to a live agent" data-state="idle">\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">\n              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>\n              <circle cx="9" cy="7" r="4"/>\n              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>\n              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>\n            </svg>\n            <span class="sitechat-live-agent-label">Live agent</span>\n          </button>\n          <button type="button" class="sitechat-header-close sitechat-close-btn" aria-label="Close chat">\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n              <line x1="18" y1="6" x2="6" y2="18"/>\n              <line x1="6" y1="6" x2="18" y2="18"/>\n            </svg>\n          </button>\n        </div>\n      </div>\n      \n      <div class="sitechat-messages">\n        <div class="sitechat-welcome">\n          <div class="sitechat-welcome-icon">\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">\n              <path d="M12 2L2 7l10 5 10-5-10-5z"/>\n              <path d="M2 17l10 5 10-5"/>\n              <path d="M2 12l10 5 10-5"/>\n            </svg>\n          </div>\n          <h4>Hi there! 👋</h4>\n          <p>I\'m your AI assistant. Ask me anything about this website.</p>\n          <div class="sitechat-welcome-suggestions">\n            <button class="sitechat-suggestion" data-query="What can you help me with?">What can you help me with?</button>\n            <button class="sitechat-suggestion" data-query="Tell me about this website">Tell me about this website</button>\n          </div>\n        </div>\n      </div>\n      \n      <div class="sitechat-input-wrapper">\n        <form class="sitechat-input-form">\n          <input type="text" class="sitechat-input" placeholder="Type your message..." autocomplete="off">\n          <button type="submit" class="sitechat-send" disabled>\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n              <line x1="22" y1="2" x2="11" y2="13"/>\n              <polygon points="22 2 15 22 11 13 2 9 22 2"/>\n            </svg>\n          </button>\n        </form>\n      </div>\n      \n      <div class="sitechat-branding">\n        <a href="' + config.apiUrl + '" target="_blank" rel="noopener noreferrer">\n          Powered by <strong>SiteChat</strong>\n        </a>\n      </div>\n    </div>\n  ',
+  widgetRoot["className"] = "sitechat-widget", widgetRoot["innerHTML"] = '\n    <button class="sitechat-toggle" aria-label="Toggle chat">\n      <svg class="sitechat-icon-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n        <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2v10z"/>\n      </svg>\n      <svg class="sitechat-icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n        <line x1="18" y1="6" x2="6" y2="18"/>\n        <line x1="6" y1="6" x2="18" y2="18"/>\n      </svg>\n    </button>\n    \n    <div class="sitechat-window">\n      <div class="sitechat-header">\n        <div class="sitechat-header-icon">\n          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n            <path d="M12 2L2 7l10 5 10-5-10-5z"/>\n            <path d="M2 17l10 5 10-5"/>\n            <path d="M2 12l10 5 10-5"/>\n          </svg>\n        </div>\n        <div class="sitechat-header-text">\n          <h3>' + escapeHtml(config.title) + '</h3>\n          <p>Powered by AI</p>\n        </div>\n        <div class="sitechat-header-actions" style="display:flex;align-items:center;gap:8px;flex-shrink:0;">\n          <button type="button" class="sitechat-handoff-btn" title="Talk to a live agent" data-state="idle">\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">\n              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>\n              <circle cx="9" cy="7" r="4"/>\n              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>\n              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>\n            </svg>\n            <span class="sitechat-live-agent-label">Live agent</span>\n          </button>\n          <button type="button" class="sitechat-header-close sitechat-close-btn" aria-label="Close chat">\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n              <line x1="18" y1="6" x2="6" y2="18"/>\n              <line x1="6" y1="6" x2="18" y2="18"/>\n            </svg>\n          </button>\n        </div>\n      </div>\n      \n      <div class="sitechat-messages">\n        <div class="sitechat-welcome">\n          <div class="sitechat-welcome-icon">\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">\n              <path d="M12 2L2 7l10 5 10-5-10-5z"/>\n              <path d="M2 17l10 5 10-5"/>\n              <path d="M2 12l10 5 10-5"/>\n            </svg>\n          </div>\n          <h4>Hi there! 👋</h4>\n          <p>I\'m your AI assistant. Ask me anything about this website.</p>\n          <div class="sitechat-welcome-suggestions">\n            <button class="sitechat-suggestion" data-query="What can you help me with?">What can you help me with?</button>\n            <button class="sitechat-suggestion" data-query="Tell me about this website">Tell me about this website</button>\n          </div>\n        </div>\n      </div>\n      \n      <div class="sitechat-input-wrapper">\n        <form class="sitechat-input-form">\n          <input type="text" class="sitechat-input" placeholder="Type your message..." autocomplete="off">\n          <button type="submit" class="sitechat-send" disabled>\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n              <line x1="22" y1="2" x2="11" y2="13"/>\n              <polygon points="22 2 15 22 11 13 2 9 22 2"/>\n            </svg>\n          </button>\n        </form>\n      </div>\n      \n      <div class="sitechat-branding">\n        <a href="' + escapeHtml(config.apiUrl) + '" target="_blank" rel="noopener noreferrer">\n          Powered by <strong>SiteChat</strong>\n        </a>\n      </div>\n    </div>\n  ',
     document["body"]["appendChild"](widgetRoot), injectResponsiveStyles(), updateBrandingFooter();
   const headerSubtitle = widgetRoot["querySelector"](".sitechat-header-text p");
   if (headerSubtitle) headerSubtitle["textContent"] = "Trợ lý tư vấn AI";
@@ -1108,7 +1140,7 @@
       L["classList"]["remove"]("active", "positive", "negative");
     }), H["classList"]["add"]("active", K);
     try {
-      await fetch(config.apiUrl + "/api/chat/feedback?session_id=" + sessionId + "&message_index=" + J + "&feedback=" + K, {
+      await fetch(config.apiUrl + "/api/chat/feedback?session_id=" + encodeURIComponent(sessionId) + "&message_index=" + J + "&feedback=" + K + "&site_id=" + encodeURIComponent(config.siteId), {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -1184,11 +1216,9 @@
     M["className"] = "sitechat-message-content";
     const N = document["createElement"]("div");
     N["className"] = "sitechat-message " + H;
-    let O = G;
-    H === "bot" && (O = markdownToHtml(G));
-    let P = O;
-    config.showSources && I && I["length"] > 0 && (P += '\n        <div class="sitechat-sources">\n          <div class="sitechat-sources-label">\n            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>\n              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>\n            </svg>\n            Nguồn tham khảo\n          </div>\n          <div class="sitechat-sources-list">\n            ' + I["map"](R => '\n              <a href="' + R["url"] + '" target="_blank" class="sitechat-source-link" title="' + R["url"] + '">\n                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">\n                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>\n                  <polyline points="15 3 21 3 21 9"/>\n                  <line x1="10" y1="14" x2="21" y2="3"/>\n                </svg>\n                ' + (R["title"] || "Nguồn") + "\n              </a>\n            ")["join"]("") + "\n          </div>\n        </div>\n      ");
-    N["innerHTML"] = P, M["appendChild"](N);
+    N["innerHTML"] = H === "bot" ? markdownToHtml(G) : escapeHtml(G);
+    if (config.showSources) appendSources(N, I);
+    M["appendChild"](N);
     const Q = document["createElement"]("div");
     const messageTime = options.timestamp ? new Date(options.timestamp) : new Date();
     Q["className"] = "sitechat-message-time", Q["textContent"] = messageTime["toLocaleTimeString"]([], {
@@ -1212,8 +1242,35 @@
       persistMessage(G, H, I, messageTime["toISOString"]());
     }
   }
+  function appendSources(message, sources) {
+    if (!Array.isArray(sources)) return;
+    const links = sources.map(source => {
+      const url = safeHttpUrl(source && source.url);
+      if (!url) return null;
+      const link = document.createElement("a");
+      link.className = "sitechat-source-link";
+      link.href = url;
+      link.title = url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = source.title || "Nguồn";
+      return link;
+    }).filter(Boolean);
+    if (!links.length) return;
+    const wrapper = document.createElement("div");
+    wrapper.className = "sitechat-sources";
+    const label = document.createElement("div");
+    label.className = "sitechat-sources-label";
+    label.textContent = "Nguồn tham khảo";
+    const list = document.createElement("div");
+    list.className = "sitechat-sources-list";
+    links.forEach(link => list.appendChild(link));
+    wrapper.appendChild(label);
+    wrapper.appendChild(list);
+    message.appendChild(wrapper);
+  }
   function markdownToHtml(G) {
-    let H = G["replace"](/\*\*(.*?)\*\*/g, "<strong>$1</strong>")["replace"](/`([^`]+)`/g, "<code>$1</code>")["split"]("\n\n")["map"](I => I["trim"]())["filter"](I => I)["map"](I => {
+    let H = escapeHtml(G)["replace"](/\*\*(.*?)\*\*/g, "<strong>$1</strong>")["replace"](/`([^`]+)`/g, "<code>$1</code>")["split"]("\n\n")["map"](I => I["trim"]())["filter"](I => I)["map"](I => {
       if (I["match"](/^[\*\-]\s/m)) {
         const J = I["split"]("\n")["map"](K => K["replace"](/^[\*\-]\s/, "")["trim"]())["filter"](K => K);
         return "<ul>" + J["map"](K => "<li>" + K + "</li>")["join"]("") + "</ul>";

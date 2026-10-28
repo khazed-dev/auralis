@@ -83,6 +83,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
         working-directory: widget
       - run: |
+          npm test
           npm run build
           node --check dist/chatbot.js
           node --check dist/chatbot.min.js

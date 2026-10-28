@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 from loguru import logger
 
 from app.config import settings
-from app.core.security import validate_public_http_url
+from app.core.security import PublicHttpResolver, validate_public_http_url
 from app.database import get_mongodb
 
 
@@ -75,6 +75,7 @@ class CrawlerService:
         queue = [start_url]
         
         async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(resolver=PublicHttpResolver()),
             timeout=aiohttp.ClientTimeout(total=30),
             headers={
                 # A number of otherwise public sites return a bot-block page or

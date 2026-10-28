@@ -272,3 +272,85 @@ class TestSRIHashGeneration:
         hash2 = generate_sri_hash_for_file(str(test_file))
         
         assert hash1 == hash2
+
+
+class TestEmbedOriginHardening:
+    @staticmethod
+    def request(host="safe.example.test", forwarded_host="evil.example.test"):
+        from starlette.requests import Request
+        return Request({
+            "type": "http", "scheme": "https", "path": "/api/embed/script/site",
+            "query_string": b"", "server": ("safe.example.test", 443),
+            "headers": [(b"host", host.encode()), (b"x-forwarded-host", forwarded_host.encode()),
+                        (b"x-forwarded-proto", b"javascript")],
+        })
+
+    def test_development_fallback_ignores_forwarded_origin(self, monkeypatch):
+        from app.routes.embed import settings, get_embed_url
+        monkeypatch.setattr(settings, "SITE_URL", "")
+        monkeypatch.setattr(settings, "ENVIRONMENT", "development")
+        assert get_embed_url(self.request(forwarded_host="example.test';alert(1);//")) == "https://safe.example.test"
+
+    @pytest.mark.parametrize("configured", ["", "https://safe.test';alert(1);//", "javascript://safe.test", "https://user:pass@safe.test", "https://safe.test/path", "https://safe.test/?x=1", "https://safe.test/#fragment", "https://safe.test:0"])
+    def test_production_requires_valid_explicit_origin(self, monkeypatch, configured):
+        from app.routes.embed import settings, get_embed_url
+        from fastapi import HTTPException
+        monkeypatch.setattr(settings, "SITE_URL", configured)
+        monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+        with pytest.raises(HTTPException) as error:
+            get_embed_url(self.request())
+        assert error.value.status_code == 503
+
+    @pytest.mark.parametrize("configured", ["https://auralis.example.test/", "http://localhost:8000", "https://[2001:db8::1]:8443"])
+    def test_valid_configured_origin_is_preserved(self, monkeypatch, configured):
+        from app.routes.embed import settings, get_embed_url
+        monkeypatch.setattr(settings, "SITE_URL", configured)
+        assert get_embed_url(self.request()) == configured.rstrip("/")
+
+    @pytest.mark.asyncio
+    async def test_script_encodes_dynamic_javascript_literals(self, authenticated_client, mock_database, sample_site):
+        import json
+        from html.parser import HTMLParser
+        from urllib.parse import quote
+
+        malicious_id = "site';globalThis.pwned=1;"
+        mock_database.seed_site({**sample_site, "site_id": malicious_id})
+        # Exercise the real endpoint and both SRI branches without contacting an external service.
+        for sri in (None, "sha384-\"</script><img src=x onerror=alert(1)>\u2028"):
+            with patch("app.routes.embed.get_widget_sri_hash", return_value=sri):
+                response = await authenticated_client.get(
+                    "/api/embed/script/" + quote(malicious_id, safe="") + "?include_sri=true"
+                )
+            assert response.status_code == 200
+            script = response.json()["embed_script"]
+            tags = []
+            class Tags(HTMLParser):
+                def handle_starttag(self, tag, attrs): tags.append(tag)
+            Tags().feed(script)
+            assert tags == ["script"]
+            assert json.dumps(malicious_id) in script
+            assert "<img" not in script
+
+    def test_all_inline_values_cannot_terminate_the_script_element(self):
+        import json
+        from app.routes.embed import _embed_script, _script_literal
+        value = "</script><img src=x onerror=alert(1)>\"'&\u2028\u2029"
+        literal = _script_literal(value)
+        assert json.loads(literal) == value
+        assert not any(char in literal for char in "<>&\u2028\u2029")
+        script = _embed_script("https://example.test", value, value)
+        assert script.count("</script>") == 1
+        assert "<img" not in script
+        assert script.count(literal) == 2
+
+    @pytest.mark.asyncio
+    async def test_bad_production_origin_does_not_enqueue_setup(self, authenticated_client, mock_database, monkeypatch):
+        from app.routes.embed import settings, generate_site_id
+        monkeypatch.setattr(settings, "SITE_URL", "")
+        monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+        queue = MagicMock(enqueue=AsyncMock())
+        with patch("app.routes.embed.get_crawl_queue", return_value=queue):
+            response = await authenticated_client.post("/api/embed/setup", json={"url": "https://example.test"})
+        assert response.status_code == 503
+        queue.enqueue.assert_not_awaited()
+        assert await mock_database.get_site(generate_site_id("https://example.test")) is None

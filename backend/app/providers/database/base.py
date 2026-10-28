@@ -140,6 +140,18 @@ class BaseDatabaseProvider(ABC):
     async def get_user_by_id(self, user_id: str) -> Optional[Dict]:
         """Get user by ID."""
         pass
+
+    @abstractmethod
+    async def update_user(
+        self, user_id: str, updates: Dict, *, revoke_sessions: bool = False,
+        expected: Optional[Dict] = None,
+    ) -> bool:
+        """Atomically update fields matching expected values.
+
+        Revocation increments token_version and removes refresh credentials in
+        the same write. An absent expected field can use {"$exists": False}.
+        """
+        pass
     
     # ===========================================
     # Crawl Job Operations

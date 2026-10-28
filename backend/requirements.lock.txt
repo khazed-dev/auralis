@@ -1,4 +1,5 @@
 # Snapshot of the working Ubuntu 24.04 / Python 3.12 EC2 environment, 2026-10-27.
+# Includes targeted security patch updates applied on 2026-10-28; not a pristine EC2 snapshot.
 # Linux deployment lock; includes CPU-only PyTorch and the OpenAI provider.
 --extra-index-url https://download.pytorch.org/whl/cpu
 aiofiles==25.1.0
@@ -99,7 +100,7 @@ pydantic-settings==2.16.1
 pydantic_core==2.50.1
 Pygments==2.21.0
 pymongo==4.19.0
-pypdf==6.21.1
+pypdf==6.21.2
 pypdfium2==5.14.0
 pytest==9.1.1
 pytest-asyncio==1.4.0

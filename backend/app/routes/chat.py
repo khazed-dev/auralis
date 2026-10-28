@@ -1,7 +1,7 @@
 """
 Chat API routes.
 """
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -14,7 +14,7 @@ from app.config import settings
 from app.core.security import get_client_ip
 from app.routes.dependencies import require_widget_site
 from app.routes.auth import require_auth
-from app.core.site_access import can_manage_site
+from app.core.site_access import can_manage_site, can_view_site, is_admin, is_agent, assigned_site_ids
 from app.services.subscriptions import enforce_quota, increment_usage
 from app.services.byok import record_model_usage, tenant_llm_for_site
 
@@ -29,6 +29,26 @@ async def _validate_widget_site(request: Request, site_id: str) -> dict:
     if not site_id:
         raise HTTPException(status_code=422, detail="site_id is required")
     return await require_widget_site(request, site_id)
+
+
+async def _validate_session_site(mongodb, session_id: str, site_id: str) -> None:
+    conversation = await mongodb.get_conversation_full(session_id)
+    if conversation and conversation.get("site_id") != site_id:
+        raise HTTPException(status_code=409, detail="Session is not available for this site")
+
+
+async def _authorized_conversation(mongodb, session_id: str, user: dict, *, manage: bool = False) -> dict:
+    conversation = await mongodb.get_conversation_full(session_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    site_id = conversation.get("site_id")
+    if not site_id and is_admin(user):
+        return conversation
+    site = await mongodb.get_site(site_id) if site_id else None
+    allowed = can_manage_site if manage else can_view_site
+    if not site or not allowed(user, site):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conversation
 
 
 async def check_handoff_suggestion(site_id: str, answer: str, confidence: float) -> tuple[bool, str]:
@@ -73,6 +93,7 @@ async def chat(request: Request, body: ChatRequest):
     try:
         site = await _validate_widget_site(request, body.site_id)
         mongodb = await get_mongodb()
+        await _validate_session_site(mongodb, body.session_id, body.site_id)
         owner_id = str(site.get("user_id") or "")
         if owner_id:
             await enforce_quota(mongodb, owner_id, "messages")
@@ -82,7 +103,8 @@ async def chat(request: Request, body: ChatRequest):
         response = await rag_engine.chat(
             message=body.message,
             session_id=body.session_id,
-            user_id=body.user_id,
+            # Public visitor input cannot select another account's private memory.
+            user_id=None,
             site_id=body.site_id
         )
         
@@ -124,6 +146,7 @@ async def preview_chat(
             raise HTTPException(status_code=404, detail="Site not found")
         if not can_manage_site(user, site):
             raise HTTPException(status_code=403, detail="Access denied")
+        await _validate_session_site(mongodb, body.session_id, body.site_id)
 
         owner_id = str(site.get("user_id") or "")
         if owner_id:
@@ -133,7 +156,7 @@ async def preview_chat(
         response = await rag_engine.chat(
             message=body.message,
             session_id=body.session_id,
-            user_id=body.user_id,
+            user_id=str(user["_id"]) if body.user_id == str(user["_id"]) else None,
             site_id=body.site_id,
         )
         if owner_id:
@@ -158,6 +181,7 @@ async def chat_stream(request: Request, body: ChatRequest):
     try:
         site = await _validate_widget_site(request, body.site_id)
         mongodb = await get_mongodb()
+        await _validate_session_site(mongodb, body.session_id, body.site_id)
         owner_id = str(site.get("user_id") or "")
         if owner_id:
             await enforce_quota(mongodb, owner_id, "messages")
@@ -169,7 +193,7 @@ async def chat_stream(request: Request, body: ChatRequest):
                 async for chunk in rag_engine.chat_stream(
                     message=body.message,
                     session_id=body.session_id,
-                    user_id=body.user_id,
+                    user_id=None,
                     site_id=body.site_id,
                 ):
                     yield f"data: {chunk}\n\n"
@@ -197,7 +221,7 @@ async def chat_stream(request: Request, body: ChatRequest):
 
 
 @router.get("/history/{session_id}", response_model=ConversationHistory)
-async def get_history(session_id: str):
+async def get_history(session_id: str, user: dict = Depends(require_auth)):
     """
     Get conversation history for a session.
     
@@ -205,7 +229,8 @@ async def get_history(session_id: str):
     """
     try:
         mongodb = await get_mongodb()
-        messages = await mongodb.get_conversation_history(session_id, limit=50)
+        conversation = await _authorized_conversation(mongodb, session_id, user)
+        messages = conversation.get("messages", [])[-50:]
         
         return ConversationHistory(
             session_id=session_id,
@@ -218,17 +243,19 @@ async def get_history(session_id: str):
                 )
                 for m in messages
             ],
-            created_at=messages[0]["timestamp"] if messages else None,
-            updated_at=messages[-1]["timestamp"] if messages else None
+            created_at=messages[0].get("timestamp") if messages else None,
+            updated_at=messages[-1].get("timestamp") if messages else None
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"History error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/history/{session_id}")
-async def clear_history(session_id: str):
+async def clear_history(session_id: str, user: dict = Depends(require_auth)):
     """
     Clear conversation history for a session.
     
@@ -236,17 +263,20 @@ async def clear_history(session_id: str):
     """
     try:
         mongodb = await get_mongodb()
-        result = await mongodb.clear_conversation(session_id)
+        await _authorized_conversation(mongodb, session_id, user, manage=True)
+        result = bool(await mongodb.delete_conversations_bulk([session_id]))
         
         return {"success": result, "message": "Conversation cleared"}
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Clear history error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/sessions")
-async def get_sessions(limit: int = 20):
+async def get_sessions(limit: int = Query(20, ge=1, le=100), user: dict = Depends(require_auth)):
     """
     Get all conversation sessions.
     
@@ -254,7 +284,14 @@ async def get_sessions(limit: int = 20):
     """
     try:
         mongodb = await get_mongodb()
-        sessions = await mongodb.get_all_sessions(limit=limit)
+        if is_admin(user):
+            site_ids = None
+        elif is_agent(user):
+            site_ids = assigned_site_ids(user)
+        else:
+            sites = await mongodb.list_sites(user_id=str(user["_id"]))
+            site_ids = [site["site_id"] for site in sites]
+        sessions = await mongodb.get_all_sessions(limit=limit, site_ids=site_ids)
         
         return {
             "sessions": [
@@ -274,9 +311,11 @@ async def get_sessions(limit: int = 20):
 
 @router.post("/feedback")
 async def submit_feedback(
+    request: Request,
     session_id: str,
-    message_index: int,
-    feedback: str
+    feedback: str,
+    site_id: str = Query(..., min_length=1),
+    message_index: int = Query(..., ge=0),
 ):
     """
     Submit feedback for a chat message.
@@ -289,7 +328,13 @@ async def submit_feedback(
         raise HTTPException(status_code=400, detail="Feedback must be 'positive' or 'negative'")
     
     try:
+        await _validate_widget_site(request, site_id)
         mongodb = await get_mongodb()
+        conversation = await mongodb.get_conversation_full(session_id)
+        if not conversation or conversation.get("site_id") != site_id:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        if message_index >= len(conversation.get("messages", [])):
+            raise HTTPException(status_code=404, detail="Message not found")
         result = await mongodb.add_feedback_by_index(session_id, message_index, feedback)
         
         if result:

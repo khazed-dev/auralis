@@ -4,10 +4,12 @@
   "private": true,
   "description": "Auralis AI embeddable chatbot widget",
   "scripts": {
+    "test": "node --test test/*.test.cjs",
     "build": "node build.js",
     "build:watch": "nodemon --watch src -e js --exec \"npm run build\""
   },
   "devDependencies": {
+    "acorn": "8.15.0",
     "javascript-obfuscator": "^4.1.1"
   }
 }

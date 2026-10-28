@@ -248,9 +248,16 @@ class AuthService:
     def hash_refresh_token(token: str) -> str:
         return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
-    async def issue_refresh_token(self, user_id: str) -> str:
+    @staticmethod
+    def _session_version_filter(user: dict) -> dict:
+        return {"token_version": user["token_version"] if "token_version" in user else {"$exists": False}}
+
+    async def issue_refresh_token(self, user_id: str, *, expected_user: Optional[dict] = None) -> str:
         """Issue and persist a single-use refresh token (rotation on every use)."""
         token = secrets.token_urlsafe(48)
+        user = expected_user or await self._provider.get_user_by_id(user_id)
+        if not user:
+            raise ValueError("User not found")
         updates = {
             "refresh_token_hash": self.hash_refresh_token(token),
             "refresh_expires_at": datetime.utcnow() + timedelta(
@@ -258,7 +265,11 @@ class AuthService:
             ),
             "updated_at": datetime.utcnow(),
         }
-        await self._provider.update_user(user_id, updates)
+        expected = self._session_version_filter(user)
+        if "password_hash" in user:
+            expected["password_hash"] = user["password_hash"]
+        if not await self._provider.update_user(user_id, updates, expected=expected):
+            raise ValueError("Authentication state changed; sign in again")
         return token
 
     async def rotate_refresh_token(self, user_id: str, token: str) -> Optional[tuple[dict, str]]:
@@ -271,8 +282,18 @@ class AuthService:
             return None
         if not expires or expires <= datetime.utcnow():
             return None
-        new_token = await self.issue_refresh_token(user_id)
-        return await self._provider.get_user_by_id(user_id), new_token
+        new_token = secrets.token_urlsafe(48)
+        updates = {
+            "refresh_token_hash": self.hash_refresh_token(new_token),
+            "refresh_expires_at": datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+            "updated_at": datetime.utcnow(),
+        }
+        # Compare-and-swap prevents replay and a stale refresh from undoing a
+        # concurrent password reset. Return this generation, never a later one.
+        expected = {"refresh_token_hash": expected, **self._session_version_filter(user)}
+        if not await self._provider.update_user(user_id, updates, expected=expected):
+            return None
+        return {**user, **updates}, new_token
 
     async def get_user_by_refresh_token(self, token: str) -> Optional[dict]:
         token_hash = self.hash_refresh_token(token)
@@ -283,14 +304,8 @@ class AuthService:
     async def revoke_refresh_token(self, user_id: str) -> None:
         await self._provider.update_user(
             user_id,
-            {
-                "refresh_token_hash": None,
-                "refresh_expires_at": None,
-                "token_version": int(
-                    (await self._provider.get_user_by_id(user_id) or {}).get("token_version") or 0
-                ) + 1,
-                "updated_at": datetime.utcnow(),
-            },
+            {"updated_at": datetime.utcnow()},
+            revoke_sessions=True,
         )
     
     async def get_user_by_id(self, user_id: str) -> Optional[dict]:
@@ -329,7 +344,12 @@ class AuthService:
                 updates["password_hash"] = get_password_hash(data.new_password)
 
         if hasattr(self._provider, "update_user"):
-            await self._provider.update_user(user_id, updates)
+            expected = {"password_hash": user.get("password_hash"), **self._session_version_filter(user)} if data.new_password else None
+            changed = await self._provider.update_user(
+                user_id, updates, revoke_sessions=bool(data.new_password), expected=expected,
+            )
+            if data.new_password and not changed:
+                raise ValueError("Authentication state changed; sign in again")
 
         return await self._provider.get_user_by_id(user_id)
     
@@ -353,7 +373,7 @@ class AuthService:
             return user
         updates["updated_at"] = datetime.utcnow()
         if hasattr(self._provider, "update_user"):
-            await self._provider.update_user(user_id, updates)
+            await self._provider.update_user(user_id, updates, revoke_sessions=bool(data.password))
         return await self._provider.get_user_by_id(user_id)
     
     async def delete_user(self, user_id: str) -> bool:
@@ -434,7 +454,7 @@ class AuthService:
             return agent
 
         if hasattr(self._provider, "update_user"):
-            await self._provider.update_user(agent_id, updates)
+            await self._provider.update_user(agent_id, updates, revoke_sessions=bool(data.password))
         return await self._provider.get_user_by_id(agent_id)
 
     async def delete_support_agent(self, caller: dict, agent_id: str) -> bool:

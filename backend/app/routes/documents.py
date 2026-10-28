@@ -64,6 +64,8 @@ async def upload_documents(
     user_id = str(user["_id"])
     if site.get("user_id") and site["user_id"] != user_id and user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Access denied")
+    if len(files) > processor.MAX_FILES_PER_UPLOAD:
+        raise HTTPException(status_code=422, detail=f"Upload at most {processor.MAX_FILES_PER_UPLOAD} files at a time")
     
     results = []
     documents_to_index = []
@@ -80,7 +82,14 @@ async def upload_documents(
         
         try:
             # Read file content
-            content = await file.read()
+            content = await file.read(processor.MAX_FILE_SIZE + 1)
+            if len(content) > processor.MAX_FILE_SIZE:
+                results.append({
+                    "filename": file.filename,
+                    "success": False,
+                    "error": f"File too large. Maximum size is {processor.MAX_FILE_SIZE // (1024 * 1024)}MB",
+                })
+                continue
             
             # Process document
             result = await processor.process_file(content, file.filename, file.content_type)
