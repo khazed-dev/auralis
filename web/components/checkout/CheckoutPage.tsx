@@ -5,45 +5,67 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { BrandLogo } from "@/components/ui/BrandLogo";
 import { Icon } from "@/components/ui/Icon";
+import { CatalogPlan, fetchPlan } from "@/lib/plans";
 import styles from "./checkout.module.css";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
-const plans = {
-  starter: { name: "Khởi đầu", price: 0, features: ["1 website", "1.000 hội thoại AI", "100 trang lập chỉ mục", "1 thành viên"] },
-  growth: { name: "Tăng trưởng", price: 2_400_000, features: ["5 website", "10.000 hội thoại AI mỗi tháng", "2.000 trang lập chỉ mục", "5 thành viên và handoff"] },
-  business: { name: "Doanh nghiệp", price: 9_800_000, features: ["20 website", "100.000 hội thoại AI mỗi tháng", "20.000 trang lập chỉ mục", "20 thành viên và hỗ trợ ưu tiên"] },
-} as const;
-type PlanKey = keyof typeof plans;
 type Quote = { subtotal: number; discount: number; vat: number; total: number };
+type PricingState = { key: string; plan: CatalogPlan | null; quote: Quote | null; error: string };
 type SePayCheckout = { url: string; fields: Record<string, string> };
 type Order = {
   order_id: string; access_token?: string; status: "pending" | "processing" | "completed" | "expired";
   order_type?: "signup" | "subscription_change";
-  plan: PlanKey; trial_ends_at?: string; expires_at?: string; email: string;
+  plan: string; plan_name?: string; trial_ends_at?: string; expires_at?: string; email: string;
   password?: string; payment_method: string; total: number; checkout?: SePayCheckout;
 };
 const money = (value: number) => `${value.toLocaleString("vi-VN")} VNĐ`;
 
 export function CheckoutPage() {
   const params = useSearchParams();
-  const requested = params.get("plan") as PlanKey;
-  const planKey: PlanKey = requested in plans ? requested : "growth";
-  const plan = plans[planKey];
+  const planKey = params.get("plan") || "growth";
   const [promo, setPromo] = useState("");
   const [appliedPromo, setAppliedPromo] = useState("");
-  const [quote, setQuote] = useState<Quote>({ subtotal: plan.price, discount: 0, vat: Math.round(plan.price * .1), total: Math.round(plan.price * 1.1) });
+  const [pricing, setPricing] = useState<PricingState | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [order, setOrder] = useState<Order | null>(null);
-  const query = useMemo(() => `${API_BASE}/checkout/quote?plan=${planKey}${appliedPromo ? `&promo_code=${encodeURIComponent(appliedPromo)}` : ""}`, [planKey, appliedPromo]);
+  const query = useMemo(() => `${API_BASE}/checkout/quote?plan=${encodeURIComponent(planKey)}${appliedPromo ? `&promo_code=${encodeURIComponent(appliedPromo)}` : ""}`, [planKey, appliedPromo]);
+  const pricingKey = `${query}:${attempt}`;
+  const plan = pricing?.plan?.key === planKey ? pricing.plan : null;
+  const quote = pricing?.key === pricingKey ? pricing.quote : null;
+  const pricingError = pricing?.key === pricingKey ? pricing.error : "";
 
   useEffect(() => {
-    fetch(query).then(async response => {
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.detail);
-      setQuote(body);
-      setError("");
-    }).catch((reason: Error) => setError(reason.message));
-  }, [query]);
+    let controller: AbortController | undefined;
+    function load() {
+      controller?.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
+      Promise.all([
+        fetchPlan(planKey, signal),
+        fetch(query, { cache: "no-store", signal }).then(async response => {
+          const body = await response.json();
+          if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : "Không thể tính giá gói dịch vụ.");
+          return body as Quote;
+        }),
+      ]).then(([nextPlan, nextQuote]) => {
+        if (!signal.aborted) setPricing({ key: pricingKey, plan: nextPlan, quote: nextQuote, error: "" });
+      }).catch((reason: Error) => {
+        if (signal.aborted) return;
+        setPricing(current => ({ key: pricingKey, plan: current?.plan?.key === planKey ? current.plan : null, quote: null, error: reason.message }));
+      });
+    }
+    function refresh() { if (document.visibilityState === "visible") load(); }
+    load();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      controller?.abort();
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [query, planKey, pricingKey]);
 
   useEffect(() => {
     const callbackOrder = params.get("order");
@@ -76,49 +98,63 @@ export function CheckoutPage() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!quote || !plan || submitting) return;
     setError("");
-    const form = new FormData(event.currentTarget);
-    const response = await fetch(`${API_BASE}/checkout/complete`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        plan: planKey,
-        email: form.get("email"),
-        company_name: form.get("company_name"),
-        promo_code: appliedPromo || null,
-        payment_method: "bank_transfer",
-        accepted_terms: form.get("accepted_terms") === "on",
-      }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setError(typeof body.detail === "string" ? body.detail : "Không thể tạo đơn thanh toán.");
-      return;
-    }
-    const created = body as Order;
-    if (created.access_token) {
-      window.sessionStorage.setItem(`auralis-payment:${created.order_id}`, created.access_token);
-    }
-    if (created.checkout) {
-      const gatewayForm = document.createElement("form");
-      gatewayForm.method = "POST";
-      gatewayForm.action = created.checkout.url;
-      Object.entries(created.checkout.fields).forEach(([name, value]) => {
-        const input = document.createElement("input");
-        input.type = "hidden";
-        input.name = name;
-        input.value = value;
-        gatewayForm.appendChild(input);
+    setSubmitting(true);
+    try {
+      const form = new FormData(event.currentTarget);
+      const response = await fetch(`${API_BASE}/checkout/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: planKey,
+          email: form.get("email"),
+          company_name: form.get("company_name"),
+          promo_code: appliedPromo || null,
+          payment_method: "bank_transfer",
+          accepted_terms: form.get("accepted_terms") === "on",
+        }),
       });
-      document.body.appendChild(gatewayForm);
-      gatewayForm.submit();
-      return;
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(typeof body.detail === "string" ? body.detail : "Không thể tạo đơn thanh toán.");
+        return;
+      }
+      const created = body as Order;
+      if (created.access_token) {
+        window.sessionStorage.setItem(`auralis-payment:${created.order_id}`, created.access_token);
+      }
+      if (created.checkout) {
+        const gatewayForm = document.createElement("form");
+        gatewayForm.method = "POST";
+        gatewayForm.action = created.checkout.url;
+        Object.entries(created.checkout.fields).forEach(([name, value]) => {
+          const input = document.createElement("input");
+          input.type = "hidden";
+          input.name = name;
+          input.value = value;
+          gatewayForm.appendChild(input);
+        });
+        document.body.appendChild(gatewayForm);
+        gatewayForm.submit();
+        return;
+      }
+      setOrder(created);
+    } catch {
+      setError("Không thể tạo đơn thanh toán. Vui lòng thử lại.");
+    } finally {
+      setSubmitting(false);
     }
-    setOrder(created);
   }
 
-  if (order?.status === "completed") return <CheckoutSuccess result={order} planName={plans[order.plan].name} />;
+  if (order?.status === "completed") return <CheckoutSuccess result={order} planName={order.plan_name || (plan?.key === order.plan ? plan.name : order.plan)} />;
   if (order) return <PaymentWaiting order={order} />;
+  if (!plan) return <div className={`checkout-page ${styles.page}`}><main className={`checkout-card ${styles.catalogState}`}>
+    <h1>{pricingError || error ? "Chưa thể tải gói dịch vụ" : "Đang tải gói dịch vụ..."}</h1>
+    {(pricingError || error) && <p role="alert">{pricingError || error}</p>}
+    {(pricingError || error) && <button type="button" onClick={() => setAttempt(value => value + 1)}>Thử lại</button>}
+    <Link href="/register">Chọn gói dịch vụ</Link>
+  </main></div>;
 
   return <div className={`checkout-page ${styles.page}`}>
     <header className="checkout-header"><Link href="/" aria-label="Về trang chủ"><BrandLogo /></Link><span><Icon name="check" /> Thanh toán qua SePay</span></header>
@@ -130,10 +166,10 @@ export function CheckoutPage() {
       <aside>
         <section className="checkout-card order-summary">
           <h1>Tóm tắt đơn hàng</h1>
-          <div className="checkout-plan-line"><div><h2>Gói {plan.name}</h2><p>Thanh toán hàng tháng</p></div><strong>{money(plan.price)}</strong></div>
-          <div className="checkout-features"><b>Bao gồm trong gói:</b>{plan.features.map(feature => <span key={feature}>✓ &nbsp; {feature}</span>)}</div>
-          <div className="checkout-costs"><span>Tạm tính <b>{money(quote.subtotal)}</b></span>{quote.discount > 0 && <span>Giảm giá <b>-{money(quote.discount)}</b></span>}<span>VAT (10%) <b>{money(quote.vat)}</b></span></div>
-          <div className="checkout-total"><strong>Tổng thanh toán</strong><b>{money(quote.total)}</b></div>
+          <div className="checkout-plan-line"><div><h2>Gói {plan.name}</h2><p>Thanh toán hàng tháng</p></div><strong>{money(quote?.subtotal ?? plan.monthly_price ?? 0)}</strong></div>
+          <div className="checkout-features"><b>Bao gồm trong gói:</b>{plan.display_features.map(feature => <span key={feature}>✓ &nbsp; {feature}</span>)}</div>
+          <div className="checkout-costs"><span>Tạm tính <b>{quote ? money(quote.subtotal) : "—"}</b></span>{quote && quote.discount > 0 && <span>Giảm giá <b>-{money(quote.discount)}</b></span>}<span>VAT ({plan.vat_rate}%) <b>{quote ? money(quote.vat) : "—"}</b></span></div>
+          <div className="checkout-total"><strong>Tổng thanh toán</strong><b>{quote ? money(quote.total) : "Đang tính..."}</b></div>
           <label className="promo-label" htmlFor="checkout-promo">Mã giảm giá</label><div className="promo-entry"><input id="checkout-promo" value={promo} onChange={event => setPromo(event.target.value)} placeholder="Nhập mã" /><button type="button" onClick={() => setAppliedPromo(promo.trim().toUpperCase())}>Áp dụng</button></div>
         </section>
         <div className="checkout-trust"><Icon name="clock" /> Trạng thái thanh toán được cập nhật tự động</div>
@@ -150,9 +186,9 @@ export function CheckoutPage() {
             Thẻ tín dụng / ghi nợ <span>Sắp ra mắt</span>
           </button>
         </section>
-        {error && <p className="checkout-error" role="alert">{error}</p>}
+        {(error || pricingError) && <p className="checkout-error" role="alert">{error || pricingError} {pricingError && <button type="button" onClick={() => setAttempt(value => value + 1)}>Thử lại</button>}</p>}
         <label className="checkout-terms"><input name="accepted_terms" type="checkbox" required /> Tôi đồng ý với Điều khoản dịch vụ và Chính sách bảo mật.</label>
-        <button className="checkout-submit">{quote.total === 0 ? "Đăng ký ngay" : "Tiếp tục thanh toán"}<span>{money(quote.total)}</span></button>
+        <button className="checkout-submit" disabled={!quote || submitting}>{submitting ? "Đang xử lý..." : !quote ? "Đang tính giá..." : quote.total === 0 ? "Đăng ký ngay" : "Tiếp tục thanh toán"}{quote && <span>{money(quote.total)}</span>}</button>
       </main>
     </form>
     <footer className="checkout-footer">© 2026 Auralis AI. Mọi quyền được bảo lưu.<span>Chính sách bảo mật　 Điều khoản dịch vụ　 Liên hệ hỗ trợ</span></footer>

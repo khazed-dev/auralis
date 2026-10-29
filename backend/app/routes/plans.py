@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 
 from app.database import get_mongodb
@@ -85,14 +85,16 @@ async def _audit(db, actor: dict, action: str, plan: dict, before: Optional[dict
 
 
 @router.get("/plans/public")
-async def public_plans():
+async def public_plans(response: Response):
+    response.headers["Cache-Control"] = "no-store"
     db = await get_mongodb()
     rows = await db.db.plans.find({"is_public": True, "is_active": True}).sort("display_order", 1).to_list(100)
     return [serialize_plan(row) for row in rows]
 
 
 @router.get("/plans/{key}")
-async def public_plan(key: str):
+async def public_plan(key: str, response: Response):
+    response.headers["Cache-Control"] = "no-store"
     plan = await get_plan(await get_mongodb(), key)
     if not plan:
         raise HTTPException(status_code=404, detail="Không tìm thấy gói")

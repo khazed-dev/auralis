@@ -1,62 +1,41 @@
-import { Icon } from "@/components/ui/Icon";
+"use client";
 
-const plans = [
-  {
-    key: "starter",
-    name: "Khởi đầu",
-    price: "Miễn phí",
-    suffix: "",
-    features: [
-      "Dùng thử đầy đủ trong 7 ngày",
-      "100 hội thoại AI",
-      "Lập chỉ mục 50 trang",
-      "Báo cáo cơ bản",
-    ],
-    cta: "Bắt đầu dùng thử",
-  },
-  {
-    key: "growth",
-    name: "Tăng trưởng",
-    price: "2,4 triệu",
-    suffix: "VNĐ/tháng",
-    features: [
-      "2.000 hội thoại AI mỗi tháng",
-      "Không giới hạn số trang",
-      "Tải lên PDF và Word",
-      "Chuyển tiếp cho nhân viên",
-    ],
-    cta: "Chọn gói Tăng trưởng",
-    popular: true,
-  },
-  {
-    key: "business",
-    name: "Doanh nghiệp",
-    price: "9,8 triệu",
-    suffix: "VNĐ/tháng",
-    features: [
-      "10.000 hội thoại AI mỗi tháng",
-      "Hỗ trợ ưu tiên",
-      "Truy cập API",
-      "Tùy chỉnh thương hiệu",
-    ],
-    cta: "Chọn gói Doanh nghiệp",
-  },
-  {
-    key: "custom",
-    name: "Tùy chỉnh",
-    price: "Linh hoạt",
-    suffix: "",
-    features: [
-      "Kết nối API model riêng",
-      "Tự chọn nhà cung cấp AI",
-      "Không tính phí sử dụng model",
-      "Hỗ trợ cấu hình và triển khai",
-    ],
-    cta: "Liên hệ triển khai",
-  },
-];
+import { useEffect, useState } from "react";
+import { Icon } from "@/components/ui/Icon";
+import { CatalogPlan, fetchPlanCatalog, planPresentation } from "@/lib/plans";
 
 export function Pricing() {
+  const [plans, setPlans] = useState<CatalogPlan[] | null>(null);
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let controller: AbortController | undefined;
+    function load() {
+      controller?.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
+      fetchPlanCatalog(signal).then(value => {
+        if (signal.aborted) return;
+        setPlans(value);
+        setError("");
+      }).catch(() => {
+        if (signal.aborted) return;
+        setPlans(null);
+        setError("Không thể tải bảng giá. Vui lòng thử lại.");
+      });
+    }
+    function refresh() { if (document.visibilityState === "visible") load(); }
+    load();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      controller?.abort();
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [attempt]);
+
   return (
     <section className="section pricing" id="pricing">
       <div className="container">
@@ -64,26 +43,29 @@ export function Pricing() {
           <h2>Bảng giá đơn giản, minh bạch</h2>
           <p>Linh hoạt mở rộng theo nhu cầu hỗ trợ của doanh nghiệp.</p>
         </div>
+        {error ? <p role="alert">{error} <button type="button" onClick={() => setAttempt(value => value + 1)}>Thử lại</button></p>
+          : plans === null ? <p role="status">Đang tải bảng giá...</p>
+          : plans.length === 0 ? <p>Hiện chưa có gói dịch vụ công khai.</p> : null}
         <div className="pricing-grid">
-          {plans.map((plan) => (
-            <article className={`plan ${plan.popular ? "popular" : ""}`} key={plan.name}>
-              {plan.popular && <span className="popular-label">Phổ biến nhất</span>}
-              <h3>{plan.name}</h3>
+          {plans?.map((plan) => {
+            const view = planPresentation(plan);
+            return <article className={`plan ${view.badge ? "popular" : ""}`} key={plan.key}>
+              {view.badge && <span className="popular-label">{view.badge}</span>}
+              <h3>{view.title}</h3>
               <div className="price">
-                {plan.price} <small>{plan.suffix}</small>
+                {view.price} <small>{view.suffix}</small>
               </div>
               <ul>
-                {plan.features.map((feature) => (
+                {view.features.map((feature) => (
                   <li key={feature}>
                     <Icon name="check" /> {feature}
                   </li>
                 ))}
               </ul>
-              <a className={plan.popular ? "button" : "plan-button"} href={plan.key === "custom" ? "/#contact" : `/checkout?plan=${plan.key}`}>
-                {plan.cta}
-              </a>
-            </article>
-          ))}
+              {view.href ? <a className={view.badge ? "button" : "plan-button"} href={view.href}>{view.action}</a>
+                : <button className="plan-button" type="button" disabled>Tạm ngừng đăng ký</button>}
+            </article>;
+          })}
         </div>
       </div>
     </section>
