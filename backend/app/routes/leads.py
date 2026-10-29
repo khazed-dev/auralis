@@ -19,6 +19,7 @@ from app.models.schemas import (
 )
 from app.core.security import get_client_ip
 from app.routes.dependencies import require_widget_site
+from app.utils.csv_export import safe_csv_row
 
 limiter = Limiter(key_func=get_client_ip)
 
@@ -159,13 +160,13 @@ async def export_leads(
         if isinstance(captured_at, datetime):
             captured_at = captured_at.strftime("%Y-%m-%d %H:%M:%S")
         
-        writer.writerow([
+        writer.writerow(safe_csv_row([
             lead.get("email", ""),
             lead.get("name", ""),
             captured_at,
             lead.get("source", "chat"),
             lead.get("session_id", "")
-        ])
+        ]))
     
     output.seek(0)
     

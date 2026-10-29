@@ -1,4 +1,8 @@
 import os
+import hashlib
+import hmac
+import json
+import re
 import httpx
 from fastapi import APIRouter, Request, HTTPException
 from loguru import logger
@@ -8,6 +12,7 @@ from app.services.rag_engine import get_rag_engine
 router = APIRouter(prefix="/api/messenger", tags=["messenger"])
 
 VERIFY_TOKEN = os.getenv("FB_VERIFY_TOKEN", "").strip()
+APP_SECRET = os.getenv("FB_APP_SECRET", "").strip()
 PAGE_ACCESS_TOKEN = os.getenv("FB_PAGE_ACCESS_TOKEN", "").strip()
 GRAPH_VERSION = os.getenv("FB_GRAPH_API_VERSION", "v20.0").strip()
 
@@ -17,13 +22,17 @@ EURO_SITE_ID = os.getenv("MESSENGER_SITE_ID", "dd3e2142f3a8").strip()
 
 @router.get("/webhook")
 async def verify_webhook(request: Request):
+    if not VERIFY_TOKEN:
+        raise HTTPException(status_code=503, detail="Messenger verification is not configured")
     params = request.query_params
 
     mode = params.get("hub.mode")
     token = params.get("hub.verify_token")
     challenge = params.get("hub.challenge")
 
-    if mode == "subscribe" and token == VERIFY_TOKEN:
+    if mode == "subscribe" and token and hmac.compare_digest(token.encode(), VERIFY_TOKEN.encode()):
+        if not challenge or not re.fullmatch(r"[0-9]{1,20}", challenge):
+            raise HTTPException(status_code=400, detail="Invalid challenge")
         return int(challenge)
 
     raise HTTPException(status_code=403, detail="Verification failed")
@@ -31,7 +40,19 @@ async def verify_webhook(request: Request):
 
 @router.post("/webhook")
 async def receive_message(request: Request):
-    body = await request.json()
+    if not APP_SECRET:
+        raise HTTPException(status_code=503, detail="Messenger webhook is not configured")
+    raw_body = await request.body()
+    supplied = request.headers.get("X-Hub-Signature-256", "")
+    expected = "sha256=" + hmac.new(APP_SECRET.encode(), raw_body, hashlib.sha256).hexdigest()
+    if not re.fullmatch(r"sha256=[0-9a-fA-F]{64}", supplied) or not hmac.compare_digest(supplied.lower(), expected):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    try:
+        body = json.loads(raw_body)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid webhook body") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid webhook body")
 
     if body.get("object") != "page":
         return {"status": "ignored"}
@@ -113,7 +134,6 @@ async def ask_rag(text: str, sender_id: str) -> str:
         message=text,
         session_id=session_id,
         site_id=EURO_SITE_ID,
-        stream=False
     )
 
     # Lấy câu trả lời

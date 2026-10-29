@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import {
   API_BASE,
   authFetch,
+  clearSession,
   DashboardUser,
   DEV_AUTH_ENABLED,
   getStoredUser,
@@ -58,6 +60,7 @@ async function apiError(response: Response, fallback: string) {
 }
 
 export function SettingsModule() {
+  const router = useRouter();
   const initialUser = useMemo(() => getStoredUser(), []);
   const isAdmin = initialUser?.role === "admin";
   const [panel, setPanel] = useState<Panel>("profile");
@@ -141,6 +144,11 @@ export function SettingsModule() {
         });
         if (!response.ok) throw new Error(await apiError(response, "Không thể lưu hồ sơ."));
         updated = (await response.json()) as DashboardUser;
+      }
+      if (newPassword && !DEV_AUTH_ENABLED) {
+        clearSession();
+        router.replace(`/login?email=${encodeURIComponent(updated.email)}`);
+        return;
       }
       setUser(updated);
       localStorage.setItem("user", JSON.stringify(updated));

@@ -7,6 +7,7 @@ import html
 import asyncio
 import ipaddress
 import socket
+from aiohttp.resolver import ThreadedResolver
 from typing import Optional
 from urllib.parse import urlparse
 from fastapi import Request, HTTPException, status
@@ -60,31 +61,71 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 # Request Validation Middleware
 # ===========================================
 
-class RequestValidationMiddleware(BaseHTTPMiddleware):
-    """Validate and sanitize incoming requests."""
-    
-    MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10MB
-    
-    async def dispatch(self, request: Request, call_next):
-        # Check content length
-        content_length = request.headers.get("content-length")
-        if content_length and int(content_length) > self.MAX_CONTENT_LENGTH:
-            return JSONResponse(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                content={"detail": "Request body too large"}
-            )
-        
-        # Block suspicious user agents (basic bot protection)
-        user_agent = request.headers.get("user-agent", "").lower()
-        blocked_agents = ["sqlmap", "nikto", "nessus", "nmap"]
-        if any(agent in user_agent for agent in blocked_agents):
-            logger.warning(f"Blocked suspicious user agent: {user_agent} from {request.client.host}")
-            return JSONResponse(
-                status_code=status.HTTP_403_FORBIDDEN,
-                content={"detail": "Access denied"}
-            )
-        
-        return await call_next(request)
+class RequestValidationMiddleware:
+    """Bound the real ASGI body before parsing or performing downstream mutations."""
+
+    MAX_CONTENT_LENGTH = 10 * 1024 * 1024
+    MAX_UPLOAD_CONTENT_LENGTH = 51 * 1024 * 1024  # 50MB file plus multipart metadata.
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def reject(code, detail):
+            await JSONResponse(status_code=code, content={"detail": detail})(scope, receive, send)
+
+        headers = scope.get("headers", [])
+        lengths = [value.strip() for name, value in headers if name.lower() == b"content-length"]
+        encodings = [value.strip().lower() for name, value in headers if name.lower() == b"transfer-encoding"]
+        if (len(headers) > 100 or len(lengths) > 1 or len(encodings) > 1 or (lengths and encodings)
+                or (lengths and (len(lengths[0]) > 20 or not re.fullmatch(rb"[0-9]+", lengths[0])))
+                or (encodings and encodings[0] != b"chunked")):
+            await reject(400, "Invalid request headers")
+            return
+
+        upload = scope.get("path", "").startswith("/api/documents/upload/")
+        limit = self.MAX_UPLOAD_CONTENT_LENGTH if upload else self.MAX_CONTENT_LENGTH
+        declared = int(lengths[0]) if lengths else None
+        if declared is not None and declared > limit:
+            await reject(413, "Request body too large")
+            return
+
+        user_agent = next((value.decode("latin-1").lower() for name, value in headers if name.lower() == b"user-agent"), "")
+        if any(agent in user_agent for agent in ("sqlmap", "nikto", "nessus", "nmap")):
+            logger.warning("Blocked suspicious user agent")
+            await reject(403, "Access denied")
+            return
+
+        # Buffer only within the cap; Content-Length is never trusted as the byte count.
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > limit:
+                await reject(413, "Request body too large")
+                return
+            body.extend(chunk)
+            if not message.get("more_body", False):
+                break
+        if declared is not None and declared != len(body):
+            await reject(400, "Content-Length does not match request body")
+            return
+
+        replayed = False
+        async def replay_body():
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay_body, send)
 
 
 # ===========================================
@@ -222,19 +263,7 @@ def log_security_warnings():
 # ===========================================
 
 def get_client_ip(request: Request) -> str:
-    """Get the real client IP, considering proxies."""
-    # Check X-Forwarded-For header (for reverse proxies)
-    forwarded_for = request.headers.get("x-forwarded-for")
-    if forwarded_for:
-        # Get the first IP in the chain (original client)
-        return forwarded_for.split(",")[0].strip()
-    
-    # Check X-Real-IP header
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip
-    
-    # Fall back to direct client IP
+    """ASGI server applies its trusted-proxy policy; raw headers cannot override it here."""
     return request.client.host if request.client else "unknown"
 
 
@@ -358,7 +387,17 @@ def _is_public_ip(value: str) -> bool:
         address = ipaddress.ip_address(value)
     except ValueError:
         return False
-    return address.is_global
+    return address.is_global and not address.is_multicast
+
+
+class PublicHttpResolver(ThreadedResolver):
+    """Check the DNS answers the HTTP connector actually uses, preventing rebinding."""
+
+    async def resolve(self, host: str, port: int = 0, family: int = socket.AF_INET):
+        records = await super().resolve(host, port, family)
+        if not records or any(not _is_public_ip(record["host"]) for record in records):
+            raise OSError("Outbound hostname resolves to a non-public network address")
+        return records
 
 
 async def validate_public_http_url(url: str) -> tuple[bool, Optional[str]]:
@@ -371,15 +410,21 @@ async def validate_public_http_url(url: str) -> tuple[bool, Optional[str]]:
     """
     try:
         parsed = urlparse(url)
+        port = parsed.port
+        hostname = parsed.hostname
     except ValueError:
         return False, "Invalid URL"
 
+    if any(ord(character) < 32 or ord(character) == 127 for character in url) or "\\" in url:
+        return False, "Invalid URL characters"
     if parsed.scheme not in {"http", "https"}:
         return False, "Only HTTP and HTTPS URLs are allowed"
-    if not parsed.hostname or parsed.username or parsed.password:
+    if not hostname or parsed.username is not None or parsed.password is not None:
         return False, "URL must contain a valid public hostname without credentials"
+    if port is not None and not 1 <= port <= 65535:
+        return False, "Invalid URL port"
 
-    hostname = parsed.hostname.rstrip(".").lower()
+    hostname = hostname.rstrip(".").lower()
     if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
         return False, "Local network addresses are not allowed"
 
@@ -391,7 +436,7 @@ async def validate_public_http_url(url: str) -> tuple[bool, Optional[str]]:
             loop = asyncio.get_running_loop()
             records = await loop.getaddrinfo(
                 hostname,
-                parsed.port or (443 if parsed.scheme == "https" else 80),
+                port or (443 if parsed.scheme == "https" else 80),
                 type=socket.SOCK_STREAM,
             )
             addresses = {record[4][0].split("%", 1)[0] for record in records}

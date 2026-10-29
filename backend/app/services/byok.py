@@ -3,16 +3,18 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 from datetime import datetime, timezone
 from typing import AsyncGenerator, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
-import httpx
+import aiohttp
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException
 
 from app.config import settings
+from app.core.security import PublicHttpResolver, _is_public_ip, validate_public_http_url
 from app.services.subscriptions import get_subscription
 
 PROVIDERS = {
@@ -21,6 +23,64 @@ PROVIDERS = {
     "gemini": {"default_base_url": "https://generativelanguage.googleapis.com", "requires_key": True},
     "ollama": {"default_base_url": settings.OLLAMA_BASE_URL, "requires_key": False},
 }
+
+
+def _trusted_ollama_endpoint(provider: str, base_url: str) -> bool:
+    return provider == "ollama" and base_url.rstrip("/") == settings.OLLAMA_BASE_URL.rstrip("/")
+
+
+def validate_byok_base_url(provider: str, value: str) -> str:
+    """Only the operator's exact Ollama endpoint may access a private network."""
+    try:
+        parsed = urlparse(value)
+        port = parsed.port
+        hostname = parsed.hostname
+    except ValueError as exc:
+        raise ValueError("Invalid model API URL") from exc
+    if (
+        parsed.scheme not in {"http", "https"} or not hostname
+        or parsed.username is not None or parsed.password is not None
+        or parsed.query or parsed.fragment or "\\" in value
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+        or (port is not None and not 1 <= port <= 65535)
+    ):
+        raise ValueError("Model API URL must not contain credentials, query, fragment or an invalid port")
+    normalized = value.rstrip("/")
+    if _trusted_ollama_endpoint(provider, normalized):
+        return normalized
+    if parsed.scheme != "https":
+        raise ValueError("Tenant model API endpoints must use HTTPS")
+    hostname = hostname.rstrip(".").lower()
+    if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
+        raise ValueError("Private network BYOK endpoints are not allowed")
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        address = None
+    if address is not None and not _is_public_ip(str(address)):
+        raise ValueError("Private network BYOK endpoints are not allowed")
+    return normalized
+
+
+async def check_byok_endpoint(provider: str, base_url: str) -> bool:
+    """Validate stored configs again at use time, returning the trusted-local exception."""
+    try:
+        normalized = validate_byok_base_url(provider, base_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    trusted = _trusted_ollama_endpoint(provider, normalized)
+    if not trusted:
+        valid, error = await validate_public_http_url(normalized)
+        if not valid:
+            raise HTTPException(status_code=422, detail=f"Unsafe model API URL: {error}")
+    return trusted
+
+
+async def _response_json(response: aiohttp.ClientResponse) -> dict:
+    response.raise_for_status()
+    if not 200 <= response.status < 300:
+        raise HTTPException(status_code=502, detail="Model API redirects are not allowed")
+    return await response.json(content_type=None)
 
 
 def _fernet() -> Fernet:
@@ -88,16 +148,17 @@ class TenantLLMService:
         self.output_tokens += int(usage.get("completion_tokens") or usage.get("output_tokens") or max(1, len(answer) // 4))
 
     async def generate(self, prompt: str, system_prompt: str = None, temperature: float = .7, max_tokens: int = 2000) -> str:
-        async with httpx.AsyncClient(timeout=120) as client:
+        trusted = await check_byok_endpoint(self.provider, self.base_url)
+        connector = aiohttp.TCPConnector() if trusted else aiohttp.TCPConnector(resolver=PublicHttpResolver())
+        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=120), trust_env=False) as client:
             if self.provider == "anthropic":
                 payload = {"model": self.model, "max_tokens": max_tokens, "temperature": temperature, "messages": [{"role": "user", "content": prompt}]}
                 if system_prompt:
                     payload["system"] = system_prompt
                 response = await client.post(f"{self.base_url}/v1/messages", headers={
                     "x-api-key": self.api_key, "anthropic-version": "2023-06-01", "content-type": "application/json",
-                }, json=payload)
-                response.raise_for_status()
-                data = response.json()
+                }, json=payload, allow_redirects=False)
+                data = await _response_json(response)
                 answer = "".join(item.get("text", "") for item in data.get("content", []) if item.get("type") == "text")
             elif self.provider == "gemini":
                 contents = [{"role": "user", "parts": [{"text": prompt}]}]
@@ -108,9 +169,9 @@ class TenantLLMService:
                     f"{self.base_url}/v1beta/models/{quote(self.model, safe='')}:generateContent",
                     headers={"x-goog-api-key": self.api_key, "content-type": "application/json"},
                     json=payload,
+                    allow_redirects=False,
                 )
-                response.raise_for_status()
-                data = response.json()
+                data = await _response_json(response)
                 answer = "".join(part.get("text", "") for candidate in data.get("candidates", []) for part in candidate.get("content", {}).get("parts", []))
                 metadata = data.get("usageMetadata", {})
                 data["usage"] = {"input_tokens": metadata.get("promptTokenCount"), "output_tokens": metadata.get("candidatesTokenCount")}
@@ -118,17 +179,15 @@ class TenantLLMService:
                 response = await client.post(f"{self.base_url}/api/chat", json={
                     "model": self.model, "messages": self._messages(prompt, system_prompt), "stream": False,
                     "options": {"temperature": temperature, "num_predict": max_tokens},
-                })
-                response.raise_for_status()
-                data = response.json()
+                }, allow_redirects=False)
+                data = await _response_json(response)
                 answer = data.get("message", {}).get("content", "")
                 data["usage"] = {"input_tokens": data.get("prompt_eval_count"), "output_tokens": data.get("eval_count")}
             else:
                 response = await client.post(f"{self.base_url}/chat/completions", headers={
                     "Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json",
-                }, json={"model": self.model, "messages": self._messages(prompt, system_prompt), "temperature": temperature, "max_tokens": max_tokens})
-                response.raise_for_status()
-                data = response.json()
+                }, json={"model": self.model, "messages": self._messages(prompt, system_prompt), "temperature": temperature, "max_tokens": max_tokens}, allow_redirects=False)
+                data = await _response_json(response)
                 answer = data["choices"][0]["message"]["content"]
             self._capture(data.get("usage") or {}, prompt, answer)
             return answer

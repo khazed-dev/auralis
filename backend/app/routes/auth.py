@@ -60,6 +60,10 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     mongodb = await get_mongodb()
     auth_service = AuthService(mongodb)
     user = await auth_service.get_user_by_id(token_data.user_id)
+    if not user or int(user.get("token_version") or 0) != token_data.token_version:
+        return None
+    if user.get("must_change_password"):
+        return None
     return user
 
 
@@ -205,7 +209,10 @@ async def login(request: Request, response: Response, credentials: UserLogin):
         "role": user["role"],
         "ver": int(user.get("token_version") or 0),
     })
-    refresh_token = await auth_service.issue_refresh_token(str(user["_id"]))
+    try:
+        refresh_token = await auth_service.issue_refresh_token(str(user["_id"]), expected_user=user)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Authentication state changed; sign in again") from exc
     response.set_cookie(
         settings.AUTH_COOKIE_NAME,
         refresh_token,
@@ -271,7 +278,7 @@ async def get_me(user: dict = Depends(require_auth)):
 
 
 @router.patch("/me", response_model=UserResponse)
-async def update_me(data: ProfileUpdate, user: dict = Depends(require_auth)):
+async def update_me(data: ProfileUpdate, response: Response, user: dict = Depends(require_auth)):
     mongodb = await get_mongodb()
     auth_service = AuthService(mongodb)
     try:
@@ -280,6 +287,8 @@ async def update_me(data: ProfileUpdate, user: dict = Depends(require_auth)):
         raise HTTPException(status_code=400, detail=str(e))
     if not updated:
         raise HTTPException(status_code=404, detail="User not found")
+    if data.new_password:
+        response.delete_cookie(settings.AUTH_COOKIE_NAME, path="/api/auth")
     return user_to_response(updated)
 
 

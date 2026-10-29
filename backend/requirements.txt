@@ -35,7 +35,7 @@ pytz>=2024.1
 apscheduler>=3.10.4
 
 # Document Processing (LangChain loaders)
-pypdf>=4.0.0
+pypdf>=6.21.2
 docx2txt>=0.8
 unstructured>=0.10.0
 aiofiles>=23.2.1

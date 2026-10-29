@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { BrandLogo } from "@/components/ui/BrandLogo";
-import { API_BASE, authFetch, DashboardUser, getCurrentUser, logout } from "@/lib/auth";
+import { API_BASE, authFetch, clearSession, DashboardUser, getCurrentUser, logout } from "@/lib/auth";
 import styles from "./workspace.module.css";
 
 const primaryNav: Array<{
@@ -157,8 +157,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       return;
     }
     const updated = body as DashboardUser;
-    localStorage.setItem("user", JSON.stringify(updated));
-    setUser(updated);
+    clearSession();
+    router.replace(`/login?email=${encodeURIComponent(updated.email)}`);
   }
 
   if (loading && !user) {

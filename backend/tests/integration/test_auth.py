@@ -272,7 +272,16 @@ class TestAuthEndpoints:
         assert patch.status_code == 200
         assert patch.json()["must_change_password"] is False
 
-        allowed = await client.get("/api/sites", headers=headers)
+        revoked = await client.get("/api/sites", headers=headers)
+        assert revoked.status_code == 401
+        fresh_login = await client.post(
+            "/api/auth/login",
+            json={"email": "admin-mc@example.com", "password": "NewPassword123!"},
+        )
+        assert fresh_login.status_code == 200
+        allowed = await client.get("/api/sites", headers={
+            "Authorization": f"Bearer {fresh_login.json()['access_token']}",
+        })
         assert allowed.status_code == 200
 
     @pytest.mark.asyncio

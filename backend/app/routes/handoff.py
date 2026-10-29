@@ -5,6 +5,7 @@ import asyncio
 import json
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from typing import Optional, List
 from datetime import datetime
 from loguru import logger
@@ -13,7 +14,6 @@ from slowapi import Limiter
 from app.database import get_mongodb
 from app.routes.auth import require_auth, require_admin, require_admin_or_user
 from app.core.security import get_client_ip
-from app.services.auth import decode_token, AuthService
 
 limiter = Limiter(key_func=get_client_ip)
 from app.core.site_access import (
@@ -51,14 +51,11 @@ def _queue_sse_identity_hash(handoffs: List[dict]) -> str:
     return "|".join(parts)
 
 
-async def _get_user_from_token(token: str) -> Optional[dict]:
-    """Validate a bearer token string and return the user, or None."""
-    token_data = decode_token(token)
-    if not token_data or not token_data.user_id:
-        return None
-    mongodb = await get_mongodb()
-    auth_service = AuthService(mongodb)
-    return await auth_service.get_user_by_id(token_data.user_id)
+async def _get_user_from_token(token: str, request: Request) -> dict:
+    """Apply the same revocation, password and role checks as REST requests."""
+    return await require_auth(
+        request, HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    )
 
 
 def _serialize_datetime(obj):
@@ -94,6 +91,8 @@ async def create_handoff(request: Request, body: HandoffRequest):
 
     existing = await mongodb.get_handoff_by_session(body.session_id, active_only=True)
     if existing:
+        if existing.get("site_id") != body.site_id:
+            raise HTTPException(status_code=404, detail="Handoff not found")
         if (visitor_name and not existing.get("visitor_name")) or (
             visitor_email and not existing.get("visitor_email")
         ):
@@ -608,11 +607,7 @@ async def stream_handoff_queue(
 
     Same visibility rules as GET .../handoff/queue: agents see unassigned items and items assigned to them.
     """
-    user = await _get_user_from_token(token)
-    if not user:
-        async def _unauth():
-            yield f"event: error\ndata: {json.dumps({'error': 'Unauthorized'})}\n\n"
-        return StreamingResponse(_unauth(), media_type="text/event-stream", status_code=401)
+    user = await _get_user_from_token(token, request)
 
     mongodb = await get_mongodb()
     status_list = [status] if status else None
@@ -625,6 +620,7 @@ async def stream_handoff_queue(
                     break
 
                 try:
+                    user = await _get_user_from_token(token, request)
                     effective_site_id = site_id if (site_id and site_id != "all") else None
 
                     if effective_site_id:
@@ -681,6 +677,9 @@ async def stream_handoff_queue(
 
                         yield f"data: {json.dumps({'handoffs': safe_handoffs, 'total': total, 'pending_count': pending_count, 'active_count': active_count})}\n\n"
 
+                except HTTPException:
+                    yield f"event: error\ndata: {json.dumps({'error': 'Unauthorized'})}\n\n"
+                    break
                 except Exception as e:
                     logger.error(f"Queue SSE error: {e}")
 

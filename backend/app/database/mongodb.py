@@ -138,8 +138,11 @@ class MongoDB:
         if site_id:
             update_set["site_id"] = site_id
         
+        query = {"session_id": session_id}
+        if site_id:
+            query["site_id"] = site_id
         result = await self.db.conversations.update_one(
-            {"session_id": session_id},
+            query,
             {
                 "$push": {"messages": message},
                 "$set": update_set,
@@ -158,7 +161,7 @@ class MongoDB:
         # Track first assistant response time
         if role == "assistant":
             await self.db.conversations.update_one(
-                {"session_id": session_id, "first_response_at": {"$exists": False}},
+                {**query, "first_response_at": {"$exists": False}},
                 {"$set": {"first_response_at": datetime.utcnow()}}
             )
 
@@ -227,10 +230,11 @@ class MongoDB:
         result = await self.db.conversations.delete_one({"session_id": session_id})
         return result.deleted_count > 0
     
-    async def get_all_sessions(self, limit: int = 50) -> List[Dict]:
+    async def get_all_sessions(self, limit: int = 50, site_ids: Optional[List[str]] = None) -> List[Dict]:
         """Get all conversation sessions."""
+        query = {} if site_ids is None else {"site_id": {"$in": site_ids}}
         cursor = self.db.conversations.find(
-            {},
+            query,
             {"session_id": 1, "created_at": 1, "updated_at": 1}
         ).sort("updated_at", -1).limit(limit)
         
@@ -731,7 +735,10 @@ class MongoDB:
             user["_id"] = str(user["_id"])
         return user
     
-    async def update_user(self, user_id: str, updates: Dict) -> bool:
+    async def update_user(
+        self, user_id: str, updates: Dict, *, revoke_sessions: bool = False,
+        expected: Optional[Dict] = None,
+    ) -> bool:
         """Update user fields by user_id field or MongoDB _id."""
         from bson import ObjectId
         
@@ -745,7 +752,12 @@ class MongoDB:
             return False
         patch = dict(updates)
         patch["updated_at"] = datetime.utcnow()
-        result = await self.db.users.update_one({"_id": obj}, {"$set": patch})
+        query = {"_id": obj, **(expected or {})}
+        operation = {"$set": patch}
+        if revoke_sessions:
+            operation["$inc"] = {"token_version": 1}
+            operation["$unset"] = {"refresh_token_hash": "", "refresh_expires_at": ""}
+        result = await self.db.users.update_one(query, operation)
         return result.modified_count > 0 or result.matched_count > 0
     
     async def get_all_users(self) -> List[Dict]:

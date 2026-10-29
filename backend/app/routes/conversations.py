@@ -14,6 +14,7 @@ import io
 from app.database.mongodb import get_mongodb
 from app.routes.auth import require_auth, require_admin
 from app.core.site_access import is_admin, is_agent, assigned_site_ids, can_view_site
+from app.utils.csv_export import safe_csv_row
 from app.models.schemas import (
     ConversationListResponse,
     ConversationSearchResponse,
@@ -579,7 +580,7 @@ async def export_conversations(
             messages = conv.get("messages", [])
             if messages:
                 for msg in messages:
-                    writer.writerow([
+                    writer.writerow(safe_csv_row([
                         session_id,
                         site_id,
                         created_at,
@@ -588,9 +589,9 @@ async def export_conversations(
                         msg.get("content", ""),
                         msg.get("timestamp", ""),
                         msg.get("feedback", "")
-                    ])
+                    ]))
             else:
-                writer.writerow([session_id, site_id, created_at, updated_at, "", "", "", ""])
+                writer.writerow(safe_csv_row([session_id, site_id, created_at, updated_at, "", "", "", ""]))
 
         output.seek(0)
 
