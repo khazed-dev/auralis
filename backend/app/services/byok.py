@@ -83,6 +83,52 @@ async def _response_json(response: aiohttp.ClientResponse) -> dict:
     return await response.json(content_type=None)
 
 
+async def _stream_json(response: aiohttp.ClientResponse, *, sse: bool) -> AsyncGenerator[Optional[dict], None]:
+    """Read bounded SSE JSON events or Ollama NDJSON without buffering the response."""
+    data_lines = []
+    event_bytes = 0
+
+    def decode(value):
+        try:
+            packet = json.loads(value)
+        except (ValueError, UnicodeError) as exc:
+            raise HTTPException(status_code=502, detail="Invalid model stream data") from exc
+        if not isinstance(packet, dict):
+            raise HTTPException(status_code=502, detail="Invalid model stream data")
+        return packet
+
+    async for raw in response.content:
+        if len(raw) > 1024 * 1024:
+            raise HTTPException(status_code=502, detail="Model stream event too large")
+        line = raw.decode("utf-8").rstrip("\r\n")
+        if not sse:
+            if line.strip():
+                yield decode(line)
+            continue
+        if line.startswith("data:"):
+            value = line[5:]
+            if value.startswith(" "):
+                value = value[1:]
+            event_bytes += len(raw)
+            if event_bytes > 1024 * 1024:
+                raise HTTPException(status_code=502, detail="Model stream event too large")
+            data_lines.append(value)
+        elif not line and data_lines:
+            value = "\n".join(data_lines)
+            data_lines = []
+            event_bytes = 0
+            if value.strip() == "[DONE]":
+                yield None
+                return
+            yield decode(value)
+    if data_lines:
+        value = "\n".join(data_lines)
+        if value.strip() == "[DONE]":
+            yield None
+        else:
+            yield decode(value)
+
+
 def _fernet() -> Fernet:
     secret = (settings.BYOK_ENCRYPTION_KEY or "").strip()
     if not secret:
@@ -193,9 +239,91 @@ class TenantLLMService:
             return answer
 
     async def generate_stream(self, prompt: str, system_prompt: str = None, temperature: float = .7, max_tokens: int = 2000) -> AsyncGenerator[str, None]:
-        # A provider-neutral fallback keeps the RAG streaming contract correct.
-        answer = await self.generate(prompt, system_prompt, temperature, max_tokens)
-        yield answer
+        trusted = await check_byok_endpoint(self.provider, self.base_url)
+        connector = aiohttp.TCPConnector() if trusted else aiohttp.TCPConnector(resolver=PublicHttpResolver())
+        headers = {}
+        if self.provider == "anthropic":
+            url = f"{self.base_url}/v1/messages"
+            headers = {"x-api-key": self.api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+            payload = {"model": self.model, "max_tokens": max_tokens, "temperature": temperature, "messages": [{"role": "user", "content": prompt}], "stream": True}
+            if system_prompt:
+                payload["system"] = system_prompt
+        elif self.provider == "gemini":
+            url = f"{self.base_url}/v1beta/models/{quote(self.model, safe='')}:streamGenerateContent?alt=sse"
+            headers = {"x-goog-api-key": self.api_key, "content-type": "application/json"}
+            payload = {"contents": [{"role": "user", "parts": [{"text": prompt}]}], "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens}}
+            if system_prompt:
+                payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+        elif self.provider == "ollama":
+            url = f"{self.base_url}/api/chat"
+            payload = {"model": self.model, "messages": self._messages(prompt, system_prompt), "stream": True, "options": {"temperature": temperature, "num_predict": max_tokens}}
+        else:
+            url = f"{self.base_url}/chat/completions"
+            headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+            payload = {"model": self.model, "messages": self._messages(prompt, system_prompt), "temperature": temperature, "max_tokens": max_tokens, "stream": True, "stream_options": {"include_usage": True}}
+
+        parts = []
+        usage = {}
+        completed = False
+        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=120), trust_env=False) as client:
+            response = await client.post(url, headers=headers, json=payload, allow_redirects=False)
+            response.raise_for_status()
+            if not 200 <= response.status < 300:
+                raise HTTPException(status_code=502, detail="Model API redirects are not allowed")
+            async for packet in _stream_json(response, sse=self.provider != "ollama"):
+                if packet is None:
+                    completed = True
+                    break
+                if packet.get("error"):
+                    raise HTTPException(status_code=502, detail="Model API stream failed")
+                text = ""
+                if self.provider == "anthropic":
+                    if packet.get("type") == "message_start":
+                        usage.update(packet.get("message", {}).get("usage") or {})
+                    elif packet.get("type") == "message_delta":
+                        usage.update(packet.get("usage") or {})
+                    elif packet.get("type") == "content_block_start":
+                        block = packet.get("content_block") or {}
+                        if block.get("type") == "text":
+                            text = block.get("text") or ""
+                    elif packet.get("type") == "content_block_delta":
+                        delta = packet.get("delta") or {}
+                        if delta.get("type") == "text_delta":
+                            text = delta.get("text") or ""
+                    elif packet.get("type") == "message_stop":
+                        completed = True
+                elif self.provider == "gemini":
+                    candidates = packet.get("candidates") or []
+                    if candidates:
+                        text = "".join(part.get("text", "") for part in candidates[0].get("content", {}).get("parts", []) if not part.get("thought"))
+                        if candidates[0].get("finishReason") not in {None, "FINISH_REASON_UNSPECIFIED"}:
+                            completed = True
+                    metadata = packet.get("usageMetadata") or {}
+                    if "promptTokenCount" in metadata:
+                        usage["input_tokens"] = metadata["promptTokenCount"]
+                    if "candidatesTokenCount" in metadata:
+                        usage["output_tokens"] = metadata["candidatesTokenCount"]
+                elif self.provider == "ollama":
+                    text = (packet.get("message") or {}).get("content") or ""
+                    if "prompt_eval_count" in packet:
+                        usage["input_tokens"] = packet["prompt_eval_count"]
+                    if "eval_count" in packet:
+                        usage["output_tokens"] = packet["eval_count"]
+                    if packet.get("done"):
+                        completed = True
+                else:
+                    choices = packet.get("choices") or []
+                    if choices:
+                        text = (choices[0].get("delta") or {}).get("content") or ""
+                        if choices[0].get("finish_reason"):
+                            completed = True
+                    usage.update(packet.get("usage") or {})
+                if text:
+                    parts.append(text)
+                    yield text
+        if not completed:
+            raise HTTPException(status_code=502, detail="Incomplete model stream")
+        self._capture(usage, prompt, "".join(parts))
 
 
 async def tenant_llm_for_site(db, site: dict) -> Optional[TenantLLMService]:

@@ -168,6 +168,12 @@ async def preview_chat(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+def _sse_data(text: str) -> str:
+    # SSE joins data lines with newlines; raw text must not create event fields.
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return "".join(f"data: {line}\n" for line in normalized.split("\n")) + "\n"
+
+
 @router.post("/stream")
 @limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/minute")
 async def chat_stream(request: Request, body: ChatRequest):
@@ -194,13 +200,13 @@ async def chat_stream(request: Request, body: ChatRequest):
                     user_id=None,
                     site_id=body.site_id,
                 ):
-                    yield f"data: {chunk}\n\n"
+                    yield _sse_data(chunk)
                 if owner_id:
                     await increment_usage(mongodb, owner_id, "messages")
                     await record_model_usage(mongodb, owner_id, tenant_llm)
                 yield "data: [DONE]\n\n"
             except Exception as e:
-                yield f"data: Error: {str(e)}\n\n"
+                yield _sse_data(f"Error: {str(e)}")
         
         return StreamingResponse(
             event_generator(),
@@ -208,6 +214,7 @@ async def chat_stream(request: Request, body: ChatRequest):
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
             }
         )
         
