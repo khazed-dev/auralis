@@ -378,8 +378,8 @@ export function SitesModule() {
                 <div>
                   <h3>Cấu hình trợ lý AI</h3>
                   <p>
-                    Giao diện cấu hình, tài liệu, crawl và mã nhúng sẽ được chuyển
-                    trong module chi tiết website tiếp theo.
+                    Tùy chỉnh giao diện, bổ sung tri thức và lấy mã nhúng trong
+                    không gian quản lý website.
                   </p>
                 </div>
                 <a href={`/dashboard/sites/${selectedSite.site_id}`}>

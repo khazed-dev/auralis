@@ -1,7 +1,8 @@
-import Image from "next/image";
 import Link from "next/link";
 import { LoginForm } from "@/components/auth/LoginForm";
+import styles from "@/components/auth/auth.module.css";
 import { BrandLogo } from "@/components/ui/BrandLogo";
+import { Icon } from "@/components/ui/Icon";
 import { LoginBrandCopy, PlatformFooter } from "@/components/ui/PlatformBranding";
 
 export const metadata = {
@@ -11,55 +12,42 @@ export const metadata = {
 
 export default function LoginPage() {
   return (
-    <main className="login-page">
-      <div className="login-glow login-glow-left" />
-      <div className="login-glow login-glow-right" />
-
-      <section className="login-shell">
-        <div className="login-panel">
-          <Link className="login-mobile-logo" href="/" aria-label="Về trang chủ Auralis">
+    <main className={styles.page}>
+      <section className={styles.shell}>
+        <div className={styles.panel}>
+          <Link className={styles.logo} href="/" aria-label="Về trang chủ">
             <BrandLogo priority />
           </Link>
-
-          <LoginBrandCopy />
-
-          <div className="login-divider">
-            <span />
-            <small>Đăng nhập</small>
-            <span />
+          <div className={styles.intro}>
+            <LoginBrandCopy />
           </div>
-
           <LoginForm />
-
-          <p className="login-register">
+          <p className={styles.register}>
             Chưa có tài khoản? <Link href="/register">Đăng ký</Link>
           </p>
           <PlatformFooter />
+          <Link href="/" className={styles.back}>Về trang chủ</Link>
         </div>
-
-        <aside className="login-visual" aria-label="Giới thiệu Auralis">
-          <Image
-            className="login-visual-logo"
-            src="/logo-auralis.png"
-            alt="Auralis"
-            width={1254}
-            height={1254}
-            priority
-          />
-          <Image
-            className="login-visual-gradient"
-            src="/login-visual.svg"
-            alt=""
-            fill
-            sizes="(max-width: 900px) 0px, 50vw"
-          />
-          <blockquote>
-            <strong>“Auralis đã thay đổi cách đội ngũ chúng tôi làm việc.”</strong>
-            <p>
-              Khai thác sức mạnh của AI thấu hiểu ngữ cảnh để tổng hợp dữ liệu và
-              đẩy nhanh quá trình ra quyết định trong toàn doanh nghiệp.
-            </p>
-          </blockquote>
+        <aside className={styles.visual} aria-label="Từ tri thức doanh nghiệp đến hỗ trợ khách hàng">
+          <div className={styles.visualHeading}>
+            <span className={styles.status}><span /> Tri thức luôn kết nối</span>
+            <h2>Mỗi câu trả lời<br />bắt đầu từ sự thấu hiểu.</h2>
+            <p>Kết nối nội dung của bạn. Đưa thông tin đúng đến khách hàng, ngay trong cuộc trò chuyện.</p>
+          </div>
+          <div className={styles.workflow} aria-hidden="true">
+            <div className={styles.sources}>
+              <span><Icon name="globe" /> Website</span>
+              <span><Icon name="document" /> Tài liệu</span>
+              <span><Icon name="message" /> Hỏi & đáp</span>
+            </div>
+            <div className={styles.connection}><span /><Icon name="bot" /><span /></div>
+            <div className={styles.answer}>
+              <div className={styles.answerHeading}><span><Icon name="sparkles" /> Câu trả lời có nguồn</span><Icon name="check" /></div>
+              <div className={styles.answerLine} /><div className={styles.answerLine} /><div className={styles.answerLine} />
+              <span className={styles.citation}><Icon name="document" /> Dựa trên tri thức doanh nghiệp</span>
+            </div>
+          </div>
+          <p className={styles.visualFooter}><Icon name="headset" /> AI hỗ trợ. Đội ngũ của bạn tiếp nối.</p>
         </aside>
       </section>
     </main>

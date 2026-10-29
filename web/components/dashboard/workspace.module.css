@@ -1,0 +1,433 @@
+/* A quiet working surface; the dark navigation carries Auralis' identity. */
+.workspace {
+  --sidebar-width: 248px;
+  --background: var(--auralis-paper);
+  --surface: var(--auralis-white);
+  --subtle-surface: #edf3f4;
+  --border: var(--auralis-line);
+  --heading-text: var(--auralis-ink);
+  --body-text: #354d58;
+  --muted-text: var(--auralis-muted);
+  --primary-navy: var(--auralis-night);
+  --deep-navy: var(--auralis-panel);
+  --signal-blue: var(--auralis-action);
+  --navy: var(--auralis-ink);
+  --text: var(--body-text);
+  --line: var(--border);
+  --muted: var(--muted-text);
+  --gradient: linear-gradient(135deg, #163843, #10232f);
+  --shadow-sm: 0 2px 8px rgb(8 23 33 / 3%);
+  --shadow-lg: var(--auralis-shadow-dialog);
+  background: var(--auralis-paper);
+  color: var(--auralis-ink);
+  font-family: var(--font-inter);
+  font-size: 14px;
+  line-height: 1.6;
+  min-width: 0;
+}
+
+.workspace :is(button, input, select, textarea) { font: inherit; }
+.workspace :is(button, a, input, select, textarea, summary):focus-visible { outline: 3px solid #168d81; outline-offset: 3px; }
+.workspace :is(button, input, select, textarea):disabled { cursor: not-allowed; opacity: .55; }
+.workspace :is(h1, h2, h3) { color: var(--auralis-ink); font-family: var(--font-jakarta); letter-spacing: -.035em; }
+.workspace h1 { font-size: clamp(26px, 2.4vw, 32px); line-height: 1.25; }
+.workspace h2 { font-size: 19px; line-height: 1.4; }
+.workspace h3 { font-size: 16px; line-height: 1.5; }
+.workspace p { font-size: 14px; line-height: 1.7; }
+.workspace :is(small, time) { font-size: 12px; line-height: 1.5; }
+.workspace :is(input, select, textarea) { accent-color: var(--auralis-action); }
+.workspace :is(input:not([type="checkbox"]):not([type="radio"]):not([type="color"]), select, textarea) {
+  background: #fff; border: 1px solid #cddade; border-radius: var(--auralis-radius-control);
+  color: var(--auralis-ink); min-height: 42px; max-width: 100%; padding: 10px 12px; box-shadow: none;
+}
+.workspace :is(input, textarea)::placeholder { color: #78898f; }
+.workspace textarea { resize: vertical; line-height: 1.65; }
+.workspace input[type="checkbox"], .workspace input[type="radio"] { width: 16px; height: 16px; flex: 0 0 auto; }
+.workspace input[type="color"] { border-color: var(--auralis-line); border-radius: 6px; }
+.workspace label { color: var(--auralis-ink); font-size: 14px; }
+.workspace :global(.dashboard-content) { padding: 40px clamp(24px, 3vw, 48px); max-width: 1600px; min-width: 0; }
+.workspace :global(.dashboard-main) { min-width: 0; }
+.workspace :global(.dashboard-sidebar) { background: var(--auralis-night); border-right: 0; color: #d6e5e9; overflow-y: auto; }
+.workspace :global(.dashboard-brand) { border-color: #253640; height: 100px; padding: 20px 16px; gap: 12px; }
+.workspace :global(.dashboard-brand) > a { background: #fff; border-radius: 9px; height: 44px; padding: 8px 10px; width: 150px; flex: 0 1 150px; }
+.workspace :global(.dashboard-brand) img { width: 128px; max-width: 100%; height: auto; }
+.workspace :global(.sidebar-collapse) { background: #172c37; border-color: #2d424d; color: #d2e1e6; flex: 0 0 30px; width: 30px; height: 34px; }
+.workspace :global(.dashboard-nav) { gap: 5px; padding: 20px 12px; }
+.workspace :global(.dashboard-nav) a { color: #b8cbd3; min-height: 46px; gap: 12px; font-size: 14px; font-weight: 500; border-radius: 8px; padding: 10px 14px; }
+.workspace :global(.dashboard-nav) a:hover { color: #fff; background: #142b37; }
+.workspace :global(.dashboard-nav) a:global(.active) { background: #163d40; color: #a4f4e7; font-weight: 600; }
+.workspace :global(.dashboard-nav) a:global(.active)::before { background: var(--auralis-cyan); height: 20px; width: 2px; border-radius: 2px; left: 0; }
+.workspace :global(.dashboard-nav) svg { height: 19px; width: 19px; }
+.workspace :global(.dashboard-sidebar-footer) { border-color: #253640; }
+.workspace :global(.dashboard-utility-nav) { padding-block: 14px; }
+.workspace :global(.dashboard-user) { border-color: #253640; gap: 10px; padding: 18px 14px; }
+.workspace :global(.dashboard-avatar) { background: #c2eee5; color: #0c3e3a; height: 36px; width: 36px; border-radius: 11px; font-size: 13px; }
+.workspace :global(.dashboard-user-copy) strong { color: #eaf2f4; font-size: 13px; }
+.workspace :global(.dashboard-user-copy) small { color: #a3b8c0; font-size: 12px; }
+.workspace :global(.dashboard-user) > button { color: #b8cbd3; }
+.workspace :global(.dashboard-user) > button:hover { color: #ffc4c4; background: #392830; }
+.workspace :global(.dashboard-page-heading) { gap: 14px; margin-bottom: 28px; }
+.workspace :global(.dashboard-page-heading) > span { background: #e8f1ef; border: 0; border-radius: 12px; color: #386b64; height: 44px; width: 44px; }
+.workspace :global(.dashboard-page-heading) p { color: var(--auralis-muted); margin-top: 8px; font-size: 14px; }
+.workspace :global(.dashboard-page-heading) h1 { margin-bottom: 0; }
+.workspace :global(.dashboard-spinner) { border-top-color: var(--auralis-action); }
+.workspace :global(.dashboard-loading), .workspace:global(.dashboard-loading) { background: var(--auralis-paper); }
+
+/* Shared actions and feedback, without changing any business state. */
+.workspace :global(.sites-primary-button), .workspace :global(.handoff-claim), .workspace :global(.required-password-modal) button[type="submit"] {
+  background: var(--auralis-night); border: 1px solid var(--auralis-night); border-radius: 8px; box-shadow: none;
+  color: #fff; min-height: 42px; font-size: 14px; font-weight: 600; padding: 11px 17px;
+}
+.workspace :global(.sites-primary-button):hover, .workspace :global(.handoff-claim):hover { background: #1d3c48; color: #fff; }
+.workspace :global(.sites-alert), .workspace :global(.subscription-error), .workspace :global(.site-crawl-error) { background: #fff2f1; border: 1px solid #efc6c3; border-radius: 10px; color: #943838; padding: 14px 18px; font-size: 14px; }
+.workspace :global(.sites-alert) button { color: #943838; font-size: 13px; }
+.workspace :global(.subscription-notice), .workspace :global(.settings-message.success) { background: #eaf5ef; border: 1px solid #c9dfd1; color: #226347; border-radius: 10px; }
+.workspace :global(.site-status), .workspace :global(.subscription-status), .workspace :global(.crawl-history-status) { border-radius: 6px; font-size: 12px; font-weight: 600; padding: 5px 8px; white-space: nowrap; }
+.workspace :global(.site-status.completed), .workspace :global(.subscription-status.active), .workspace :global(.subscription-status.approved), .workspace :global(.crawl-history-status.completed) { background: #eaf5ef; color: #226347; }
+.workspace :global(.site-status.queued), .workspace :global(.site-status.running), .workspace :global(.subscription-status.pending), .workspace :global(.crawl-history-status.running) { background: #fff5dc; color: #7b5819; }
+.workspace :global(.site-status.failed), .workspace :global(.subscription-status.suspended), .workspace :global(.subscription-status.rejected), .workspace :global(.crawl-history-status.failed) { background: #ffefed; color: #9d3636; }
+.workspace :global(.site-delete-button), .workspace :global(.danger) { color: var(--auralis-danger); }
+
+/* Website list and health: the site itself is the organizing object. */
+.workspace :global(.sites-workspace) { grid-template-columns: minmax(280px, .9fr) minmax(0, 1.7fr); gap: 24px; border: 0; border-radius: 0; background: transparent; overflow: visible; }
+.workspace :global(.sites-master), .workspace :global(.sites-detail) { background: #fff; border: 1px solid var(--auralis-line); border-radius: 14px; box-shadow: none; min-width: 0; overflow: hidden; }
+.workspace :global(.sites-master-header) { padding: 20px; background: #fff; border-color: var(--auralis-line); }
+.workspace :global(.sites-master-header) strong { font-size: 15px; color: var(--auralis-ink); }
+.workspace :global(.sites-master-header) span { font-size: 12px; color: var(--auralis-muted); }
+.workspace :global(.sites-list) { padding: 8px; }
+.workspace :global(.sites-list-item) { border: 1px solid transparent; border-radius: 9px; padding: 16px 12px; gap: 12px; }
+.workspace :global(.sites-list-item):hover { background: var(--auralis-paper); }
+.workspace :global(.sites-list-item.active) { background: #edf6f3; border-color: #c6e2d8; }
+.workspace :global(.site-letter), .workspace :global(.site-overview-letter) { background: #e7efef; color: #355d60; border-radius: 10px; box-shadow: none; }
+.workspace :global(.site-list-copy) strong { color: var(--auralis-ink); font-size: 14px; }
+.workspace :global(.site-list-copy) small { color: var(--auralis-muted); font-size: 12px; }
+.workspace :global(.site-overview-header) { border-bottom: 1px solid var(--auralis-line); padding: 26px; gap: 12px; }
+.workspace :global(.site-overview-header) > div, .workspace :global(.site-overview-header) > div > div { min-width: 0; }
+.workspace :global(.site-overview-header) h2 { font-size: 22px; overflow-wrap: anywhere; }
+.workspace :global(.site-overview-header) a { color: var(--auralis-action); }
+.workspace :global(.site-metrics) { gap: 0; padding: 26px; background: #fff; }
+.workspace :global(.site-metrics) article { border-right: 1px solid var(--auralis-line); border-radius: 0; padding: 0 16px; background: transparent; }
+.workspace :global(.site-metrics) article:first-child { padding-left: 0; }
+.workspace :global(.site-metrics) article:last-child { border-right: 0; }
+.workspace :global(.site-metrics) article strong { font-family: var(--font-jakarta); color: var(--auralis-ink); font-size: 24px; }
+.workspace :global(.site-metrics) article span { font-size: 12px; color: var(--auralis-muted); }
+.workspace :global(.site-next-step) { background: #eff6f4; border: 1px solid #d5e4df; border-radius: 10px; margin: 0 26px 26px; padding: 20px; }
+.workspace :global(.site-next-step) > span { background: #d9ebe4; color: #37675a; }
+.workspace :global(.site-next-step) h3 { font-size: 16px; }
+.workspace :global(.site-next-step) p { font-size: 13px; }
+.workspace :global(.site-next-step) > a { background: #fff; border: 1px solid #c6d9d1; border-radius: 7px; color: #1d4c40; font-weight: 600; padding: 9px 14px; }
+.workspace :is(:global(.sites-empty), :global(.sites-detail-empty), :global(.conversation-empty), :global(.conversation-detail-empty), :global(.handoff-empty), :global(.team-empty), :global(.analytics-loading)) { color: var(--auralis-muted); font-size: 14px; padding: 40px 24px; }
+.workspace :global(.sites-empty) > svg, .workspace :global(.sites-detail-empty) > svg, .workspace :global(.team-empty) > svg { color: #6c9791; }
+
+/* Site configuration keeps the source-to-answer tools at hand. */
+.workspace :global(.site-detail-breadcrumb) { margin-bottom: 24px; font-size: 13px; overflow-wrap: anywhere; }
+.workspace :global(.site-detail-title) { margin-bottom: 32px; gap: 16px; }
+.workspace :global(.site-detail-title) h1 { font-size: clamp(25px, 2.5vw, 32px); overflow-wrap: anywhere; }
+.workspace :global(.site-detail-title) a { color: var(--auralis-action); overflow-wrap: anywhere; }
+.workspace :global(.site-detail-workspace) { grid-template-columns: 194px minmax(0, 1fr); gap: 24px; }
+.workspace :global(.site-detail-nav) { background: transparent; border: 0; border-right: 1px solid var(--auralis-line); border-radius: 0; padding: 0 16px 0 0; }
+.workspace :global(.site-detail-nav) small { color: #71828a; text-transform: none; letter-spacing: 0; font-weight: 500; padding: 20px 10px 8px; }
+.workspace :global(.site-detail-nav) button { font-size: 13px; border-radius: 7px; min-height: 40px; }
+.workspace :global(.site-detail-nav) button:global(.active) { background: #e2efea; color: #1d6050; font-weight: 600; border-color: transparent; }
+.workspace :global(.site-detail-back) { color: var(--auralis-action); font-size: 13px; font-weight: 600; }
+.workspace :global(.site-detail-panel) { min-width: 0; }
+.workspace :global(.site-overview-panel), .workspace :global(.site-config-form) { border: 1px solid var(--auralis-line); border-radius: 14px; background: #fff; box-shadow: none; overflow: hidden; }
+.workspace :global(.site-overview-panel) > header, .workspace :global(.site-config-form) > header { padding: 25px 28px; border-bottom: 1px solid var(--auralis-line); }
+.workspace :global(.site-config-form) :is(h2, h3) { color: var(--auralis-ink); }
+.workspace :global(.site-config-form) > header h2 { font-size: 19px; margin-bottom: 6px; }
+.workspace :global(.site-config-form) > header p { font-size: 13px; color: var(--auralis-muted); margin: 0; }
+.workspace :global(.site-config-form) > section, .workspace :global(.site-config-form) > form > section { padding: 24px 28px; border-bottom: 1px solid var(--auralis-line); }
+.workspace :global(.site-config-form) h3 { font-size: 15px; margin-bottom: 18px; }
+.workspace :global(.site-config-form) :global(.site-config-grid) { gap: 20px; }
+.workspace :global(.site-config-form) :is(input, select, textarea) { font-size: 14px; }
+.workspace :global(.site-config-form) label { gap: 8px; font-size: 13px; font-weight: 500; }
+.workspace :global(.site-config-form) label > small { font-size: 12px; color: var(--auralis-muted); font-weight: 400; }
+.workspace :global(.site-config-form) > footer, .workspace :global(.site-config-form) > form > footer { background: #f8fbfa; border-top: 0; padding: 18px 28px; gap: 12px; flex-wrap: wrap; }
+.workspace :global(.site-detail-metrics) { padding: 28px; gap: 16px; }
+.workspace :global(.site-detail-metrics) article { background: var(--auralis-paper); border-radius: 8px; border: 0; }
+.workspace :global(.site-detail-metrics) strong { color: var(--auralis-ink); font-size: 24px; }
+.workspace :global(.site-detail-steps) { padding: 0 28px 28px; }
+.workspace :global(.site-detail-steps) button { border-color: var(--auralis-line); box-shadow: none; border-radius: 9px; }
+.workspace :global(.site-detail-steps) button > span { background: #e6f0ed; color: #37675a; }
+.workspace :global(.appearance-live-layout) { gap: 24px; grid-template-columns: minmax(0, 1fr) minmax(275px, 340px); }
+.workspace :global(.management-list) article, .workspace :global(.qa-list) article { border-color: var(--auralis-line); border-radius: 8px; }
+.workspace :global(.management-list) strong, .workspace :global(.qa-list) strong { overflow-wrap: anywhere; }
+.workspace :global(.management-list) small { color: var(--auralis-muted); font-size: 12px; }
+.workspace :global(.document-upload-form) { background: var(--auralis-paper); border: 1px dashed #b8cdca; border-radius: 10px; padding: 16px; }
+.workspace :global(.document-upload-form) input { min-width: 0; }
+.workspace :global(.crawl-running-banner) { margin: 24px 28px 0; padding: 18px; background: #edf6f2; border: 1px solid #d1e7de; color: #2e6653; border-radius: 9px; }
+.workspace :global(.crawl-actions) button { background: #edf4f2; border-color: #cdded7; color: #2a584a; border-radius: 7px; min-height: 42px; }
+.workspace :global(.embed-code-header) { background: #eaf1f1; color: var(--auralis-ink); }
+.workspace :global(.embed-panel) pre { background: var(--auralis-panel); color: #d9efec; border-color: #254550; font-size: 12px; line-height: 1.9; padding: 20px; }
+.workspace :global(.sri-box) { overflow-wrap: anywhere; color: var(--auralis-muted); background: var(--auralis-paper); }
+
+/* Inbox surfaces use continuity rather than a stack of identical cards. */
+.workspace :global(.conversation-filters), .workspace :global(.handoff-filters) { gap: 12px; }
+.workspace :global(.conversation-filters) { margin-bottom: 20px; }
+.workspace :global(.conversation-filters) form { background: #fff; border-color: #cddade; border-radius: 8px; }
+.workspace :global(.conversation-filters) input { border: 0; background: transparent; box-shadow: none; }
+.workspace :global(.conversations-workspace), .workspace :global(.handoff-workspace) { border: 1px solid var(--auralis-line); border-radius: 14px; overflow: hidden; gap: 0; background: #fff; grid-template-columns: minmax(270px, .8fr) minmax(0, 1.4fr); }
+.workspace :global(.conversation-master), .workspace :global(.handoff-queue) { border: 0; border-right: 1px solid var(--auralis-line); border-radius: 0; background: #fff; }
+.workspace :global(.conversation-detail), .workspace :global(.handoff-detail) { border: 0; border-radius: 0; background: #fff; min-width: 0; }
+.workspace :global(.conversation-master-header), .workspace :global(.conversation-detail-header), .workspace :global(.handoff-detail-header) { border-color: var(--auralis-line); padding: 20px; }
+.workspace :global(.conversation-master-header) strong { font-size: 13px; }
+.workspace :global(.conversation-detail-header) h2 { font-size: 16px; }
+.workspace :global(.conversation-detail-header) p, .workspace :global(.handoff-detail-header) small { font-size: 12px; color: var(--auralis-muted); overflow-wrap: anywhere; }
+.workspace :global(.conversation-item), .workspace :global(.handoff-item) { border-bottom-color: #eaf0f1; padding: 18px 16px; gap: 12px; }
+.workspace :global(.conversation-item.active), .workspace :global(.handoff-item.active) { background: #ecf5f1; box-shadow: inset 3px 0 #4ba895; }
+.workspace :global(.conversation-item):hover, .workspace :global(.handoff-item):hover { background: #f2f7f5; }
+.workspace :global(.conversation-avatar), .workspace :global(.handoff-avatar) { background: #e8eeee; color: #48686b; border-radius: 12px; }
+.workspace :global(.conversation-item-copy) strong, .workspace :global(.handoff-item-copy) strong { font-size: 13px; color: var(--auralis-ink); }
+.workspace :global(.conversation-item-copy) > small, .workspace :global(.handoff-item-copy) > small { font-size: 13px; color: var(--auralis-muted); }
+.workspace :global(.conversation-item-copy) time { font-size: 12px; }
+.workspace :global(.conversation-stats) { background: var(--auralis-paper); border-color: var(--auralis-line); }
+.workspace :global(.conversation-stats) > span { font-size: 12px; }
+.workspace :global(.conversation-stats) strong { color: var(--auralis-ink); font-size: 15px; }
+.workspace :global(.conversation-messages) { background: #fff; padding: 24px; }
+.workspace :global(.conversation-message) { background: transparent; border: 0; box-shadow: none; }
+.workspace :global(.conversation-message) > p { background: #f2f6f6; border-color: #e3ebed; border-radius: 0 12px 12px; font-size: 14px; line-height: 1.8; color: var(--auralis-ink); overflow-wrap: anywhere; }
+.workspace :global(.conversation-message.user) > p { background: #eaf3f0; border-color: #d9e7e0; border-radius: 12px 0 12px 12px; }
+.workspace :global(.conversation-message) > div strong { color: #496168; font-size: 12px; }
+.workspace :global(.conversation-message) time { color: #62727b; font-size: 12px; }
+.workspace :global(.message-sources) a, .workspace :global(.message-sources) em { background: #fff; border-color: #d2e1dc; color: #256552; border-radius: 6px; font-size: 12px; }
+.workspace :global(.message-sources) > span { font-size: 12px; font-weight: 500; text-transform: none; }
+.workspace :global(.conversation-item-meta), .workspace :global(.handoff-meta), .workspace :global(.handoff-item-copy) em { font-size: 12px; }
+.workspace :global(.handoff-summary) { background: #f0f5f3; border-color: #dfebe5; margin: 18px; border-radius: 8px; }
+.workspace :global(.handoff-summary) > span { color: #37675a; background: #dcece4; }
+.workspace :global(.handoff-summary) p { font-size: 13px; }
+.workspace :global(.handoff-messages) { background: #fff; padding: 24px; }
+.workspace :global(.handoff-messages) article p { background: #f0f5f5; color: var(--auralis-ink); border-radius: 0 12px 12px; font-size: 14px; line-height: 1.75; overflow-wrap: anywhere; }
+.workspace :global(.handoff-messages) article:global(.agent) p { background: #e6f1ec; color: #214b3e; border-radius: 12px 0 12px 12px; }
+.workspace :global(.handoff-messages) article > span { color: var(--auralis-muted); font-size: 12px; }
+.workspace :global(.handoff-messages) article time { color: var(--auralis-muted); font-size: 12px; }
+.workspace :global(.handoff-composer) { background: #f8fbfa; border-color: var(--auralis-line); padding: 18px; }
+.workspace :global(.handoff-composer) button { background: var(--auralis-night); border-radius: 9px; height: 44px; width: 44px; }
+.workspace :global(.handoff-counts) > span { background: #fff; border: 1px solid var(--auralis-line); border-radius: 8px; color: var(--auralis-muted); font-size: 12px; }
+.workspace :global(.handoff-counts) strong { color: var(--auralis-ink); }
+
+/* Tables, billing, settings and measured analytics share restrained hierarchy. */
+.workspace :global(.team-card), .workspace :global(.settings-panel), .workspace :global(.analytics-card), .workspace :global(.quota-card), .workspace :global(.subscription-admin-section), .workspace :global(.byok-section), .workspace :global(.help-section-new) { background: #fff; border: 1px solid var(--auralis-line); border-radius: 14px; box-shadow: none; min-width: 0; }
+.workspace :is(:global(.team-card), :global(.analytics-card), :global(.subscription-admin-section), :global(.byok-section)) > header { border-color: var(--auralis-line); padding: 22px 24px; }
+.workspace :is(:global(.team-card), :global(.analytics-card), :global(.subscription-admin-section), :global(.byok-section)) > header h2 { font-size: 17px; margin-bottom: 4px; }
+.workspace :is(:global(.team-card), :global(.analytics-card), :global(.subscription-admin-section), :global(.byok-section)) > header p { color: var(--auralis-muted); font-size: 13px; }
+.workspace :is(:global(.team-table-wrap), :global(.subscription-table-wrap), :global(.crawl-history-table)) { overflow-x: auto; max-width: 100%; }
+.workspace table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.workspace table th { background: #f5f8f8; color: #6a7d85; font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; padding: 13px 18px; white-space: nowrap; border-bottom: 1px solid var(--auralis-line); }
+.workspace table td { border-color: #e8edef; color: var(--auralis-ink); font-size: 13px; padding: 17px 18px; }
+.workspace table td small { color: var(--auralis-muted); font-size: 12px; }
+.workspace table td button { border-radius: 6px; font-size: 12px; min-height: 32px; }
+.workspace table tr:hover td { background: #f9fbfa; }
+.workspace :global(.team-avatar) { background: #e5f1ed; color: #326855; border-radius: 10px; }
+.workspace :global(.team-tabs) button:global(.active) { background: #e1eee8; color: #28664f; border-color: #c4dbcd; }
+.workspace :global(.team-site-tags) span { background: #f1f5f4; color: #527064; }
+.workspace :global(.settings-workspace) { grid-template-columns: 220px minmax(0, 1fr); gap: 28px; }
+.workspace :global(.settings-nav) { gap: 8px; }
+.workspace :global(.settings-nav) button { border: 1px solid transparent; border-radius: 9px; background: transparent; padding: 14px; }
+.workspace :global(.settings-nav) button:global(.active) { background: #e5efe9; border-color: #d1e1d8; }
+.workspace :global(.settings-nav) strong { color: var(--auralis-ink); font-size: 14px; }
+.workspace :global(.settings-nav) small { font-size: 12px; color: var(--auralis-muted); }
+.workspace :global(.settings-panel) > header, .workspace :global(.settings-section) { padding: 26px 28px; border-color: var(--auralis-line); }
+.workspace :global(.settings-form-new) > footer { background: #f8fbfa; border-color: var(--auralis-line); padding: 18px 28px; }
+.workspace :global(.settings-form-grid) { gap: 22px; }
+.workspace :global(.settings-form-new) label { font-size: 13px; }
+.workspace :global(.settings-section) p { font-size: 13px; color: var(--auralis-muted); }
+.workspace :global(.health-service) { background: #f7faf9; border-color: var(--auralis-line); border-radius: 8px; }
+.workspace :global(.health-service) em:global(.healthy) { background: #e3f1e8; color: #306448; }
+.workspace :global(.subscription-hero) { background: var(--auralis-panel); border: 0; border-radius: 14px; color: #d9e8ed; box-shadow: none; padding: 28px; }
+.workspace :global(.subscription-hero) h2 { color: #fff; font-size: 29px; }
+.workspace :global(.subscription-hero) p, .workspace :global(.subscription-hero) span { color: #b8ccd2; }
+.workspace :global(.subscription-hero) strong { color: #d3f7ed; }
+.workspace :global(.subscription-hero) button { background: var(--auralis-cyan); border: 0; border-radius: 8px; color: #123b34; padding: 12px 16px; font-weight: 600; }
+.workspace :global(.quota-grid) { gap: 16px; margin-block: 24px; }
+.workspace :global(.quota-card) { padding: 22px; }
+.workspace :global(.quota-card) h3 { font-size: 14px; }
+.workspace :global(.quota-card) strong { color: var(--auralis-ink); font-size: 14px; }
+.workspace :global(.quota-track) { background: #eaf0ee; height: 6px; }
+.workspace :global(.quota-track) span { background: #3c9a81; }
+.workspace :global(.quota-track) span:global(.warning) { background: #b99443; }
+.workspace :global(.quota-track) span:global(.danger) { background: #c65d58; }
+.workspace :global(.subscription-plan-card) { border-radius: 10px; border-color: var(--auralis-line); box-shadow: none; background: #fff; }
+.workspace :global(.subscription-plan-card):has(input:checked) { border-color: #3a8c77; background: #edf6f1; box-shadow: 0 0 0 1px #3a8c77; }
+.workspace :global(.subscription-plan-card.featured) { border-color: #b8d8ca; }
+.workspace :global(.subscription-plan-badge), .workspace :global(.subscription-plan-action) { background: #e5f2eb; color: #2d674f; }
+.workspace :global(.subscription-plan-name), .workspace :global(.subscription-plan-price) { color: var(--auralis-ink); }
+.workspace :global(.subscription-change-quote) { background: #f0f6f2; border-color: #d4e5db; color: #345d48; }
+.workspace :global(.promo-admin) > form { gap: 12px; flex-wrap: wrap; }
+.workspace :global(.byok-form) { gap: 20px; padding: 24px; }
+.workspace :global(.subscription-history) { padding: 24px; background: #f8fbfa; border-color: var(--auralis-line); }
+.workspace :global(.analytics-title-row), .workspace :global(.handoffs-title-row), .workspace :global(.team-title-row), .workspace :global(.sites-toolbar) { gap: 20px; }
+.workspace :global(.analytics-controls) > div { background: #e7eeec; border: 1px solid #d8e2de; padding: 3px; border-radius: 8px; }
+.workspace :global(.analytics-controls) button { background: transparent; color: #62796e; border-radius: 5px; }
+.workspace :global(.analytics-controls) button:global(.active) { background: #fff; color: #254f40; box-shadow: 0 1px 3px rgb(8 23 33 / 8%); }
+.workspace :global(.analytics-kpis) { gap: 16px; margin-bottom: 24px; }
+.workspace :global(.analytics-kpis) article { border: 1px solid var(--auralis-line); border-radius: 12px; box-shadow: none; background: #fff; padding: 22px; gap: 14px; }
+.workspace :global(.analytics-kpis) article > span { background: #e9f0ed; color: #5b8675; border-radius: 10px; }
+.workspace :global(.analytics-kpis) strong { font-size: 28px; color: var(--auralis-ink); }
+.workspace :global(.analytics-kpis) small { font-size: 12px; color: var(--auralis-muted); }
+.workspace :global(.analytics-kpis) p { font-size: 12px; color: var(--auralis-muted); }
+.workspace :global(.analytics-chart) svg polyline:global(.conversations) { stroke: #267d69; }
+.workspace :global(.analytics-chart) svg polyline:global(.messages) { stroke: #93b7bd; }
+.workspace :global(.analytics-legend) span:global(.conversations)::before { background: #267d69; }
+.workspace :global(.analytics-legend) span:global(.messages)::before { background: #93b7bd; }
+.workspace :global(.analytics-rank-row) > span { background: #edf3f0; color: #5b7b6a; border-radius: 6px; }
+.workspace :global(.analytics-rank-row) b { background: #6ba58b; }
+.workspace :global(.analytics-rank-row) strong, .workspace :global(.analytics-rank-row) a { font-size: 13px; color: var(--auralis-ink); }
+.workspace :global(.analytics-trend) footer { background: #f8faf9; border-color: var(--auralis-line); }
+.workspace :global(.help-hero-new) { background: var(--auralis-panel); border: 0; border-radius: 14px; padding: 32px; }
+.workspace :global(.help-hero-new) h1 { color: #edf8f8; }
+.workspace :global(.help-hero-new) p { color: #bcd0d4; }
+.workspace :global(.help-hero-new) > span { background: #25434b; color: #a2e7d6; }
+.workspace :global(.help-hero-new)::after { display: none; }
+.workspace :global(.help-section-new) { padding: 24px; }
+.workspace :global(.help-step-grid) > a { background: #f6f9f7; border-color: #e0e9e3; border-radius: 9px; box-shadow: none; }
+.workspace :global(.help-step-icon) { background: #e2eee6; color: #4c7961; }
+.workspace :global(.help-step-grid) small, .workspace :global(.help-step-grid) strong { color: #467355; }
+.workspace :global(.help-step-grid) small { text-transform: none; font-weight: 500; }
+.workspace :global(.help-step-grid) > a:hover { transform: none; border-color: #b8d1c1; }
+.workspace :global(.help-faq-new) summary { font-size: 14px; }
+.workspace :global(.help-faq-new) p { font-size: 13px; }
+.workspace :global(.help-links) > a { font-size: 14px; color: var(--auralis-ink); }
+
+/* Floating layers stay above either shell and remain usable on short screens. */
+.workspace :global(.sites-modal-layer), .workspace :global(.required-password-layer) { padding: 24px; z-index: 70; }
+.workspace :global(.required-password-layer) { z-index: 1000; }
+.workspace :global(.sites-modal-backdrop), .workspace :global(.required-password-backdrop) { background: rgb(8 23 33 / 58%); backdrop-filter: blur(4px); }
+.workspace :global(.sites-modal), .workspace :global(.required-password-modal) { background: #fff; border: 1px solid #e1e9e8; border-radius: 18px; box-shadow: var(--auralis-shadow-dialog); max-height: calc(100dvh - 48px); overflow-y: auto; color: var(--auralis-ink); }
+.workspace :global(.sites-modal-header) { padding: 25px 28px; border-color: var(--auralis-line); }
+.workspace :global(.sites-modal-header) h2 { font-size: 20px; overflow-wrap: anywhere; }
+.workspace :global(.sites-modal-header) p { color: var(--auralis-muted); font-size: 13px; }
+.workspace :global(.sites-modal-header) > button { background: #f0f5f3; color: #587466; border-radius: 8px; min-width: 36px; height: 36px; }
+.workspace :global(.sites-modal) > form { padding: 26px 28px; }
+.workspace :global(.sites-modal) label { font-size: 13px; }
+.workspace :global(.sites-modal-actions) { gap: 12px; padding-top: 20px; }
+.workspace :global(.sites-modal-actions) > button { min-height: 42px; border-radius: 8px; font-size: 14px; }
+.workspace :global(.required-password-modal) { padding: 32px; max-width: 480px; width: 100%; }
+.workspace :global(.required-password-modal) h2 { font-size: 24px; }
+.workspace :global(.required-password-modal) p { color: var(--auralis-muted); }
+.workspace :global(.required-password-modal) :global(.required-password-error) { color: var(--auralis-danger); }
+
+@media (min-width: 861px) {
+  .workspace:global(.is-collapsed) { --sidebar-width: 80px; }
+  .workspace:global(.is-collapsed) :global(.dashboard-brand) { padding-inline: 0; }
+  .workspace:global(.is-collapsed) :global(.dashboard-nav) { padding-inline: 12px; }
+}
+
+@media (max-width: 1200px) {
+  .workspace { --sidebar-width: 224px; }
+  .workspace :global(.dashboard-content) { padding: 32px 24px; }
+  .workspace :global(.sites-workspace) { grid-template-columns: minmax(240px, .8fr) minmax(0, 1.2fr); gap: 16px; }
+  .workspace :global(.site-metrics) { grid-template-columns: repeat(2, 1fr); gap: 20px; }
+  .workspace :global(.site-metrics) article { padding: 0; border: 0; }
+  .workspace :global(.appearance-live-layout) { grid-template-columns: minmax(0, 1fr); }
+  .workspace :global(.analytics-kpis) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workspace :global(.conversations-workspace), .workspace :global(.handoff-workspace) { grid-template-columns: minmax(235px, .8fr) minmax(0, 1.2fr); }
+  .workspace :global(.settings-workspace) { grid-template-columns: 190px minmax(0, 1fr); gap: 20px; }
+}
+
+@media (max-width: 1000px) {
+  .workspace :global(.site-detail-workspace) { grid-template-columns: minmax(0, 1fr); }
+  .workspace :global(.site-detail-nav) { border-right: 0; border-bottom: 1px solid var(--auralis-line); position: static; display: flex; overflow-x: auto; gap: 6px; padding: 0 0 12px; }
+  .workspace :global(.site-detail-nav) > div { flex: 0 0 auto; }
+  .workspace :global(.site-detail-nav) small, .workspace :global(.site-detail-back) { display: none; }
+  .workspace :global(.site-detail-nav) button { padding-inline: 14px; white-space: nowrap; }
+  .workspace :global(.settings-workspace) { grid-template-columns: minmax(0, 1fr); }
+  .workspace :global(.settings-nav) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workspace :global(.settings-nav) button { padding: 12px; }
+  .workspace :global(.subscription-plan-options) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 860px) {
+  .workspace, .workspace:global(.is-collapsed) { --sidebar-width: 0px; }
+  .workspace :global(.dashboard-main) { margin-left: 0; }
+  .workspace :global(.dashboard-sidebar), .workspace:global(.is-collapsed) :global(.dashboard-sidebar) { width: min(280px, 88vw); visibility: hidden; }
+  .workspace :global(.dashboard-sidebar.is-open), .workspace:global(.is-collapsed) :global(.dashboard-sidebar.is-open) { visibility: visible; }
+  .workspace :global(.dashboard-mobile-header) { background: #fff; height: 72px; padding: 0 24px; border-color: var(--auralis-line); }
+  .workspace :global(.dashboard-mobile-header) > button { color: var(--auralis-ink); width: 44px; height: 44px; }
+  .workspace :global(.dashboard-mobile-header) > img { width: 124px; }
+  .workspace :global(.dashboard-overlay) { background: rgb(8 23 33 / 52%); }
+  .workspace :global(.sites-workspace) { grid-template-columns: minmax(0, 1fr); }
+  .workspace :global(.sites-list) { max-height: 320px; overflow-y: auto; }
+  .workspace :global(.site-overview-header) { padding: 24px; }
+  .workspace :global(.site-next-step) { margin: 0 24px 24px; }
+  .workspace :global(.conversations-workspace), .workspace :global(.handoff-workspace) { grid-template-columns: minmax(0, 1fr); }
+  .workspace :global(.conversation-master), .workspace :global(.handoff-queue) { border-right: 0; border-bottom: 1px solid var(--auralis-line); }
+  .workspace :global(.conversation-list), .workspace :global(.handoff-list) { max-height: 300px; min-height: 0; }
+  .workspace :global(.conversation-detail), .workspace :global(.handoff-detail) { min-height: 450px; }
+  .workspace :global(.handoff-messages), .workspace :global(.conversation-messages) { max-height: 520px; }
+  .workspace :global(.analytics-title-row), .workspace :global(.handoffs-title-row), .workspace :global(.team-title-row) { flex-wrap: wrap; }
+  .workspace :global(.dashboard-page-heading) { margin-bottom: 20px; }
+}
+
+@media (max-width: 580px) {
+  .workspace :global(.dashboard-content) { padding: 28px 16px; }
+  .workspace :global(.dashboard-mobile-header) { padding-inline: 12px; }
+  .workspace :global(.dashboard-page-heading) { align-items: flex-start; gap: 12px; }
+  .workspace :global(.dashboard-page-heading) > span { height: 38px; width: 38px; flex: 0 0 38px; }
+  .workspace :global(.dashboard-page-heading) h1 { font-size: 25px; }
+  .workspace :global(.dashboard-page-heading) p { font-size: 13px; margin-top: 7px; }
+  .workspace :global(.sites-toolbar), .workspace :global(.team-title-row) { align-items: stretch; flex-direction: column; gap: 12px; }
+  .workspace :global(.sites-toolbar) > button, .workspace :global(.team-title-row) > button { align-self: flex-start; }
+  .workspace :global(.sites-toolbar) :global(.dashboard-page-heading), .workspace :global(.team-title-row) :global(.dashboard-page-heading) { margin-bottom: 0; }
+  .workspace :global(.site-overview-header) { padding: 20px; align-items: flex-start; flex-wrap: wrap; }
+  .workspace :global(.site-overview-header) h2 { font-size: 19px; }
+  .workspace :global(.site-metrics) { padding: 20px; }
+  .workspace :global(.site-next-step) { margin: 0 20px 20px; padding: 16px; grid-template-columns: auto minmax(0, 1fr); }
+  .workspace :global(.site-next-step) > a { display: inline-flex; grid-column: 2; justify-self: start; }
+  .workspace :global(.site-detail-title) { align-items: flex-start; flex-direction: column; gap: 14px; }
+  .workspace :global(.site-detail-title) > div { min-width: 0; max-width: 100%; }
+  .workspace :global(.site-detail-title) h1 { font-size: 25px; }
+  .workspace :global(.site-config-form) > header, .workspace :global(.site-overview-panel) > header { padding: 22px 18px; }
+  .workspace :global(.site-config-form) > section, .workspace :global(.site-config-form) > form > section { padding: 22px 18px; }
+  .workspace :global(.site-config-form) > footer, .workspace :global(.site-config-form) > form > footer { padding: 18px; }
+  .workspace :global(.site-detail-metrics) { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 20px 18px; gap: 12px; }
+  .workspace :global(.site-detail-steps) { padding: 0 18px 20px; }
+  .workspace :global(.site-config-grid), .workspace :global(.settings-form-grid), .workspace :global(.subscription-form-grid), .workspace :global(.byok-form) { grid-template-columns: minmax(0, 1fr); }
+  .workspace :global(.site-config-grid) > label:global(.wide), .workspace :global(.subscription-form-grid) > label:global(.wide) { grid-column: auto; }
+  .workspace :global(.document-upload-form) { flex-direction: column; align-items: stretch; }
+  .workspace :global(.qa-list) article { flex-wrap: wrap; }
+  .workspace :global(.qa-list) article > div { flex-basis: 100%; }
+  .workspace :global(.management-list) article { gap: 10px; padding: 14px; }
+  .workspace :global(.crawl-running-banner) { margin: 18px 18px 0; flex-wrap: wrap; }
+  .workspace :global(.conversation-filters) { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .workspace :global(.conversation-filters) form { width: 100%; min-width: 0; }
+  .workspace :global(.conversation-detail-header), .workspace :global(.handoff-detail-header) { padding: 16px; flex-wrap: wrap; gap: 12px; }
+  .workspace :global(.conversation-messages), .workspace :global(.handoff-messages) { padding: 16px; }
+  .workspace :global(.conversation-message) { max-width: 100%; padding: 14px; }
+  .workspace :global(.conversation-message) > div { flex-wrap: wrap; gap: 4px; }
+  .workspace :global(.conversation-stats) { gap: 12px; padding: 16px; }
+  .workspace :global(.handoff-filters) { grid-template-columns: minmax(0, 1fr); }
+  .workspace :global(.handoff-counts) { width: 100%; }
+  .workspace :global(.analytics-controls) { flex-wrap: wrap; width: 100%; }
+  .workspace :global(.analytics-controls) select { width: 100%; }
+  .workspace :global(.analytics-kpis) { gap: 12px; }
+  .workspace :global(.analytics-kpis) article { padding: 16px; flex-direction: column; align-items: flex-start; gap: 10px; }
+  .workspace :global(.analytics-kpis) strong { font-size: 25px; }
+  .workspace :global(.analytics-card) > header { padding: 20px 18px; flex-wrap: wrap; gap: 12px; }
+  .workspace :global(.analytics-grid) { grid-template-columns: minmax(0, 1fr); }
+  .workspace :global(.analytics-trend) footer { flex-wrap: wrap; gap: 12px; padding: 16px 18px; }
+  .workspace :global(.settings-nav) { grid-template-columns: minmax(0, 1fr); }
+  .workspace :global(.settings-panel) > header, .workspace :global(.settings-section) { padding: 22px 18px; }
+  .workspace :global(.settings-form-new) > footer { padding: 18px; flex-wrap: wrap; gap: 12px; }
+  .workspace :global(.subscription-hero) { padding: 24px; flex-wrap: wrap; gap: 20px; }
+  .workspace :global(.quota-grid) { grid-template-columns: minmax(0, 1fr); }
+  .workspace :global(.quota-card) { padding: 20px; }
+  .workspace :global(.byok-form) { padding: 20px 18px; }
+  .workspace :global(.promo-admin) > form { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .workspace :global(.subscription-plan-options) { grid-template-columns: minmax(0, 1fr); }
+  .workspace :global(.help-hero-new) { padding: 26px 22px; gap: 18px; }
+  .workspace :global(.help-hero-new) h1 { font-size: 25px; }
+  .workspace :global(.help-section-new) { padding: 20px 18px; }
+  .workspace :global(.help-step-grid) { grid-template-columns: minmax(0, 1fr); }
+  .workspace :global(.help-bottom-grid) { grid-template-columns: minmax(0, 1fr); }
+  .workspace :global(.sites-modal-layer), .workspace :global(.required-password-layer) { padding: 12px; }
+  .workspace :global(.sites-modal), .workspace :global(.required-password-modal) { max-height: calc(100dvh - 24px); border-radius: 14px; }
+  .workspace :global(.sites-modal-header) { padding: 22px 18px; }
+  .workspace :global(.sites-modal) > form { padding: 20px 18px; }
+  .workspace :global(.sites-modal-actions) { flex-wrap: wrap; }
+  .workspace :global(.sites-modal-actions) > button { flex: 1 1 auto; }
+  .workspace :global(.required-password-modal) { padding: 26px 22px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace *, .workspace *::before, .workspace *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}

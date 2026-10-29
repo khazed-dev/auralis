@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import styles from "./auth.module.css";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   createDevSession,
@@ -96,7 +97,7 @@ export function LoginForm() {
   }
 
   return (
-    <form className="login-form" onSubmit={handleSubmit}>
+    <form className={`login-form ${styles.form}`} onSubmit={handleSubmit}>
       {error && (
         <div className="login-error" role="alert">
           {error}
