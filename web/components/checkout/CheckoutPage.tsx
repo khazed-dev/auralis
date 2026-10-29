@@ -4,6 +4,8 @@ import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { BrandLogo } from "@/components/ui/BrandLogo";
+import { Icon } from "@/components/ui/Icon";
+import styles from "./checkout.module.css";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
 const plans = {
@@ -118,8 +120,12 @@ export function CheckoutPage() {
   if (order?.status === "completed") return <CheckoutSuccess result={order} planName={plans[order.plan].name} />;
   if (order) return <PaymentWaiting order={order} />;
 
-  return <div className="checkout-page">
-    <header className="checkout-header"><Link href="/"><BrandLogo /></Link><span>▣ &nbsp; THANH TOÁN BẢO MẬT</span></header>
+  return <div className={`checkout-page ${styles.page}`}>
+    <header className="checkout-header"><Link href="/" aria-label="Về trang chủ"><BrandLogo /></Link><span><Icon name="check" /> Thanh toán qua SePay</span></header>
+    <div className={styles.heading}>
+      <Link href="/register">Chọn gói dịch vụ</Link><span aria-hidden="true">/</span><strong>Thông tin & thanh toán</strong>
+      <p>Một bước gần hơn đến trợ lý AI của doanh nghiệp.</p>
+    </div>
     <form className="checkout-layout" onSubmit={submit}>
       <aside>
         <section className="checkout-card order-summary">
@@ -128,9 +134,9 @@ export function CheckoutPage() {
           <div className="checkout-features"><b>Bao gồm trong gói:</b>{plan.features.map(feature => <span key={feature}>✓ &nbsp; {feature}</span>)}</div>
           <div className="checkout-costs"><span>Tạm tính <b>{money(quote.subtotal)}</b></span>{quote.discount > 0 && <span>Giảm giá <b>-{money(quote.discount)}</b></span>}<span>VAT (10%) <b>{money(quote.vat)}</b></span></div>
           <div className="checkout-total"><strong>Tổng thanh toán</strong><b>{money(quote.total)}</b></div>
-          <label className="promo-label">Mã giảm giá</label><div className="promo-entry"><input value={promo} onChange={event => setPromo(event.target.value)} placeholder="Nhập mã" /><button type="button" onClick={() => setAppliedPromo(promo.trim().toUpperCase())}>Áp dụng</button></div>
+          <label className="promo-label" htmlFor="checkout-promo">Mã giảm giá</label><div className="promo-entry"><input id="checkout-promo" value={promo} onChange={event => setPromo(event.target.value)} placeholder="Nhập mã" /><button type="button" onClick={() => setAppliedPromo(promo.trim().toUpperCase())}>Áp dụng</button></div>
         </section>
-        <div className="checkout-trust">♦ 256-bit SSL Secure　 ◉ Thanh toán xác nhận tự động</div>
+        <div className="checkout-trust"><Icon name="clock" /> Trạng thái thanh toán được cập nhật tự động</div>
       </aside>
       <main className="checkout-details">
         <section className="checkout-card"><h2>Thông tin khách hàng</h2><div className="checkout-customer">
@@ -138,15 +144,15 @@ export function CheckoutPage() {
           <label className="wide">Tên công ty<input name="company_name" placeholder="Tên doanh nghiệp" required minLength={2} /></label>
         </div></section>
         <section className="checkout-card payment-card"><h2>Phương thức thanh toán</h2>
-          <div className="payment-option selected">◉　VietQR / Chuyển khoản ngân hàng <span>QR</span></div>
+          <div className="payment-option selected"><span className={styles.paymentName}><Icon name="check" />VietQR / Chuyển khoản ngân hàng</span><span className={styles.qrBadge}>QR</span></div>
           <div className="payment-expanded bank-panel"><p>SePay sẽ tạo mã QR chứa sẵn số tiền và nội dung chuyển khoản sau khi bạn tiếp tục.</p></div>
           <button type="button" className="payment-option payment-option-disabled" disabled aria-disabled="true">
-            ○　Thẻ tín dụng / ghi nợ <span>Sắp ra mắt</span>
+            Thẻ tín dụng / ghi nợ <span>Sắp ra mắt</span>
           </button>
         </section>
-        {error && <p className="checkout-error">{error}</p>}
+        {error && <p className="checkout-error" role="alert">{error}</p>}
         <label className="checkout-terms"><input name="accepted_terms" type="checkbox" required /> Tôi đồng ý với Điều khoản dịch vụ và Chính sách bảo mật.</label>
-        <button className="checkout-submit">▣　{quote.total === 0 ? "Đăng ký ngay" : "Tiếp tục thanh toán"} — {money(quote.total)}</button>
+        <button className="checkout-submit">{quote.total === 0 ? "Đăng ký ngay" : "Tiếp tục thanh toán"}<span>{money(quote.total)}</span></button>
       </main>
     </form>
     <footer className="checkout-footer">© 2026 Auralis AI. Mọi quyền được bảo lưu.<span>Chính sách bảo mật　 Điều khoản dịch vụ　 Liên hệ hỗ trợ</span></footer>
@@ -154,10 +160,11 @@ export function CheckoutPage() {
 }
 
 function PaymentWaiting({ order }: { order: Order }) {
-  if (order.status === "expired") return <div className="checkout-success-page"><main className="success-card"><h1>Đơn hàng đã hết hạn</h1><p>Vui lòng quay lại và tạo đơn thanh toán mới.</p><div className="success-actions"><Link href={`/checkout?plan=${order.plan}`}>Tạo lại đơn</Link></div></main></div>;
-  return <div className="checkout-success-page"><main className="success-card payment-waiting-card">
+  if (order.status === "expired") return <div className={`checkout-success-page ${styles.result}`}><main className="success-card"><div className={styles.resultIcon}><Icon name="clock" /></div><h1>Đơn hàng đã hết hạn</h1><p>Vui lòng quay lại và tạo đơn thanh toán mới.</p><div className="success-actions"><Link href={`/checkout?plan=${order.plan}`}>Tạo lại đơn</Link></div></main></div>;
+  return <div className={`checkout-success-page ${styles.result}`}><main className="success-card payment-waiting-card">
+    <div className={styles.resultIcon}><Icon name="clock" /></div>
     <h1>Đang xác nhận thanh toán</h1><p>Đơn hàng <strong>#{order.order_id}</strong> đã quay về từ SePay.</p>
-    <p>Hệ thống đang chờ IPN xác nhận giao dịch. Trang sẽ tự động cập nhật.</p>
+    <p>Hệ thống đang chờ cổng thanh toán xác nhận giao dịch. Trang sẽ tự động cập nhật.</p>
   </main></div>;
 }
 
@@ -173,9 +180,9 @@ function CheckoutSuccess({ result, planName }: { result: Order; planName: string
   const dashboardHref = isUpgrade
     ? "/dashboard/subscription"
     : `/login?email=${encodeURIComponent(result.email)}`;
-  return <div className="checkout-success-page"><div className="success-glow one" /><div className="success-glow two" /><main className="success-card">
+  return <div className={`checkout-success-page ${styles.result}`}><main className="success-card">
     <div className="success-check">✓</div><h1>{isUpgrade ? "Nâng cấp thành công!" : "Đăng ký thành công!"}</h1><p>{isUpgrade ? <>Gói dịch vụ của bạn đã được nâng cấp lên <strong>{planName}</strong>.</> : <>Chào mừng bạn đến với gói <strong>{planName}</strong> của Auralis. {result.trial_ends_at ? `Tài khoản dùng thử đã sẵn sàng đến ${new Date(result.trial_ends_at).toLocaleDateString("vi-VN")}.` : "Tài khoản của bạn đã sẵn sàng để sử dụng."}</>}</p>
-    <section><small>CHI TIẾT ĐƠN HÀNG</small><span>Mã đơn hàng <b>#{result.order_id}</b></span><span>Phương thức <b>VietQR</b></span><span>Tài khoản <b>{result.email}</b></span>{result.password && <span>Mật khẩu <span className="success-password"><b>{result.password}</b><button type="button" onClick={copyPassword} aria-label="Sao chép mật khẩu" title="Sao chép mật khẩu">{copied ? "✓" : "⧉"}</button></span></span>}<span className="success-total">Tổng thanh toán <b>{money(result.total)}</b></span></section>
-    <div className="success-actions"><Link href={dashboardHref}>Đi đến Dashboard　→</Link><button type="button" onClick={() => window.print()}>▧　Xem hóa đơn</button></div><small>Bạn có thắc mắc? <a href="mailto:support@auralis.ai">Liên hệ bộ phận hỗ trợ</a></small>
+    <section><small>Chi tiết đơn hàng</small><span>Mã đơn hàng <b>#{result.order_id}</b></span><span>Phương thức <b>VietQR</b></span><span>Tài khoản <b>{result.email}</b></span>{result.password && <span>Mật khẩu <span className="success-password"><b>{result.password}</b><button type="button" onClick={copyPassword} aria-label="Sao chép mật khẩu" title="Sao chép mật khẩu">{copied ? "✓" : "⧉"}</button></span></span>}<span className="success-total">Tổng thanh toán <b>{money(result.total)}</b></span></section>
+    <div className="success-actions"><Link href={dashboardHref}>Đi đến Dashboard</Link><button type="button" onClick={() => window.print()}>Xem hóa đơn</button></div><small>Bạn có thắc mắc? <a href="mailto:support@auralis.ai">Liên hệ bộ phận hỗ trợ</a></small>
   </main></div>;
 }

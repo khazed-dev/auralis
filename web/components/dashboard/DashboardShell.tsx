@@ -6,6 +6,7 @@ import { FormEvent, ReactNode, useEffect, useState } from "react";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { BrandLogo } from "@/components/ui/BrandLogo";
 import { API_BASE, authFetch, DashboardUser, getCurrentUser, logout } from "@/lib/auth";
+import styles from "./workspace.module.css";
 
 const primaryNav: Array<{
   label: string;
@@ -162,7 +163,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   if (loading && !user) {
     return (
-      <div className="dashboard-loading">
+      <div className={`${styles.workspace} dashboard-loading`}>
         <span className="dashboard-spinner" />
         <p>Đang tải không gian làm việc...</p>
       </div>
@@ -176,13 +177,13 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const initial = (user?.name || user?.email || "A").charAt(0).toUpperCase();
 
   return (
-    <div className={`dashboard-shell ${collapsed ? "is-collapsed" : ""}`}>
+    <div className={`${styles.workspace} dashboard-shell ${collapsed ? "is-collapsed" : ""}`}>
       <button
         className={`dashboard-overlay ${mobileOpen ? "is-visible" : ""}`}
         aria-label="Đóng menu"
         onClick={() => setMobileOpen(false)}
       />
-      <aside className={`dashboard-sidebar ${mobileOpen ? "is-open" : ""}`}>
+      <aside id="dashboard-sidebar" className={`dashboard-sidebar ${mobileOpen ? "is-open" : ""}`}>
         <div className="dashboard-brand">
           <Link href={user?.role === "platform_admin" ? "/dashboard/admin/subscriptions" : "/dashboard/sites"} aria-label="Auralis">
             <BrandLogo priority />
@@ -191,6 +192,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             className="sidebar-collapse"
             type="button"
             onClick={toggleCollapsed}
+            aria-expanded={!collapsed}
             aria-label={collapsed ? "Mở rộng thanh điều hướng" : "Thu gọn thanh điều hướng"}
           >
             ‹
@@ -200,7 +202,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         <nav className="dashboard-nav" aria-label="Điều hướng chính">
           {navItems.map((item) => (
             <Link
-              className={pathname === item.href ? "active" : ""}
+              className={pathname === item.href || pathname.startsWith(`${item.href}/`) ? "active" : ""}
+              aria-current={pathname === item.href || pathname.startsWith(`${item.href}/`) ? "page" : undefined}
               href={item.href}
               key={item.href}
               title={collapsed ? item.label : undefined}
@@ -252,7 +255,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
       <div className="dashboard-main">
         <header className="dashboard-mobile-header">
-          <button type="button" onClick={() => setMobileOpen(true)} aria-label="Mở menu">
+          <button type="button" onClick={() => setMobileOpen(true)} aria-label="Mở menu" aria-expanded={mobileOpen} aria-controls="dashboard-sidebar">
             <Icon name="menu" />
           </button>
           <BrandLogo />

@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import { API_BASE, authFetch } from "@/lib/auth";
+import styles from "./platform.module.css";
 
 type Dict = Record<string, unknown>;
 type Overview = {
@@ -59,7 +60,7 @@ async function json<T>(response: Response | Promise<Response>): Promise<T> {
 
 export function PlatformModule({ section }: { section: string }) {
   const normalized = ["overview", "customers", "plans", "requests", "promos", "payments", "audit"].includes(section) ? section : "overview";
-  return <main className="platform-content">
+  return <main className={`${styles.content} platform-content`}>
     {normalized === "overview" && <OverviewView />}
     {normalized === "customers" && <CustomersView />}
     {normalized === "plans" && <PlansView />}
@@ -75,7 +76,7 @@ function PageHead({ title, description, action }: { title: string; description: 
 }
 
 function ErrorBox({ value }: { value: string }) {
-  return value ? <p className="platform-error">{value}</p> : null;
+  return value ? <p className="platform-error" role="alert">{value}</p> : null;
 }
 
 function OverviewView() {

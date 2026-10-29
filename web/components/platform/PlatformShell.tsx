@@ -7,6 +7,8 @@ import { ReactNode, useEffect, useState } from "react";
 import { BrandLogo } from "@/components/ui/BrandLogo";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { DashboardUser, getCurrentUser, logout } from "@/lib/auth";
+import workspace from "../dashboard/workspace.module.css";
+import styles from "./platform.module.css";
 
 const nav: Array<{ href: string; label: string; icon: IconName }> = [
   { href: "/platform", label: "Tổng quan", icon: "grid" },
@@ -48,12 +50,12 @@ export function PlatformShell({ children }: { children: ReactNode }) {
   }
 
   if (!user) {
-    return <div className="platform-loading"><span className="dashboard-spinner" /><p>Đang tải khu vực quản trị...</p></div>;
+    return <div className={`${styles.loading} platform-loading`}><span className="dashboard-spinner" /><p>Đang tải khu vực quản trị...</p></div>;
   }
 
   const initial = (user.name || user.email).charAt(0).toUpperCase();
 
-  return <div className={`dashboard-shell platform-shell ${collapsed ? "is-collapsed" : ""}`}>
+  return <div className={`${workspace.workspace} ${styles.platformRoot} dashboard-shell platform-shell ${collapsed ? "is-collapsed" : ""}`}>
     <button
       className={`dashboard-overlay ${mobileOpen ? "is-visible" : ""}`}
       onClick={() => setMobileOpen(false)}
@@ -82,6 +84,7 @@ export function PlatformShell({ children }: { children: ReactNode }) {
           return <Link
             href={item.href}
             className={active ? "active" : ""}
+            aria-current={active ? "page" : undefined}
             key={item.href}
             title={collapsed ? item.label : undefined}
             onClick={() => setMobileOpen(false)}
