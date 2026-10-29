@@ -10,6 +10,7 @@ import re
 import uuid
 
 from app.config import settings
+from app.models.schemas import DEFAULT_HANDOFF_PHRASES
 from .base import BaseDatabaseProvider
 
 
@@ -825,12 +826,7 @@ class MongoDBProvider(BaseDatabaseProvider):
                 },
                 "offline_message": "We're currently offline. Leave your email and we'll get back to you."
             },
-            "auto_suggest_phrases": [
-                "I'm not sure",
-                "I don't have information",
-                "I cannot help with",
-                "please contact support"
-            ]
+            "auto_suggest_phrases": list(DEFAULT_HANDOFF_PHRASES)
         })
     
     async def update_site_handoff_config(self, site_id: str, config: Dict) -> bool:

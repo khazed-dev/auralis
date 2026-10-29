@@ -527,7 +527,7 @@ class TestCalculateConfidence:
     def test_calculate_confidence_no_docs(self, rag_engine):
         """Should return low confidence with no documents."""
         confidence = rag_engine._calculate_confidence([])
-        assert confidence == 0.3
+        assert confidence == 0.0
     
     def test_calculate_confidence_high_relevance(self, rag_engine):
         """Should return high confidence with highly relevant docs."""

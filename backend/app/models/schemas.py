@@ -550,6 +550,22 @@ class BusinessHoursConfig(BaseModel):
     )
 
 
+DEFAULT_HANDOFF_PHRASES = (
+    "I'm not sure",
+    "I don't have information",
+    "I cannot help with",
+    "please contact support",
+    "tôi không chắc",
+    "mình không chắc",
+    "chưa có đủ thông tin",
+    "chưa đủ thông tin",
+    "không có đủ thông tin",
+    "chưa có thông tin",
+    "không có thông tin",
+    "không tìm thấy thông tin",
+)
+
+
 class HandoffConfig(BaseModel):
     """Handoff configuration for a site."""
     enabled: bool = Field(default=True, description="Whether handoff is enabled")
@@ -559,12 +575,7 @@ class HandoffConfig(BaseModel):
     )
     business_hours: BusinessHoursConfig = Field(default_factory=BusinessHoursConfig)
     auto_suggest_phrases: List[str] = Field(
-        default_factory=lambda: [
-            "I'm not sure",
-            "I don't have information",
-            "I cannot help with",
-            "please contact support"
-        ],
+        default_factory=lambda: list(DEFAULT_HANDOFF_PHRASES),
         description="Phrases that trigger handoff suggestion"
     )
 

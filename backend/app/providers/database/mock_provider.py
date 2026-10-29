@@ -8,6 +8,7 @@ import uuid
 import re
 
 from .base import BaseDatabaseProvider
+from app.models.schemas import DEFAULT_HANDOFF_PHRASES
 
 
 class MockDatabaseProvider(BaseDatabaseProvider):
@@ -817,7 +818,7 @@ class MockDatabaseProvider(BaseDatabaseProvider):
                 },
                 "offline_message": "We're currently offline."
             },
-            "auto_suggest_phrases": []
+            "auto_suggest_phrases": list(DEFAULT_HANDOFF_PHRASES)
         })
     
     async def update_site_handoff_config(self, site_id: str, config: Dict) -> bool:

@@ -672,7 +672,7 @@ Return only the questions, one per line, no numbering:"""
     ) -> float:
         """Heuristic retrieval confidence, not a probability of answer correctness."""
         if not docs:
-            return 0.3  # Low confidence with no sources
+            return 0.0  # No retrieved evidence; stay below positive handoff thresholds.
 
         # Repeated content is not independent evidence, even under different URLs.
         scores_by_content = {}
@@ -684,7 +684,7 @@ Return only the questions, one per line, no numbering:"""
             scores_by_content[content] = max(scores_by_content.get(content, 0.0), relevance)
 
         if not scores_by_content:
-            return 0.3
+            return 0.0
         return min(0.95, sum(scores_by_content.values()) / len(scores_by_content))
 
 
