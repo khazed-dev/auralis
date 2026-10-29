@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { API_BASE, authFetch, getStoredUser } from "@/lib/auth";
+import { CatalogPlan, planPresentation } from "@/lib/plans";
 
 type Resource = { used: number; limit: number | null; remaining: number | null; percent: number };
 type Summary = {
@@ -10,7 +11,7 @@ type Summary = {
   period: string;
   resources: Record<string, Resource>;
 };
-type Plan = { key: string; name: string; limits: Record<string, number | null> };
+type Plan = CatalogPlan;
 type Request = { id: string; requested_plan: string; status: string; note?: string; created_at: string };
 type ByokConfig = {
   configured: boolean; provider?: string; model?: string; base_url?: string;
@@ -33,28 +34,6 @@ type CheckoutOrder = {
 const labels: Record<string, string> = {
   sites: "Website", members: "Thành viên", messages: "Tin nhắn AI", crawl_pages: "Trang crawl",
 };
-const planPresentation: Record<string, {
-  title: string; price: string; suffix?: string; badge?: string; action: string; features: string[];
-}> = {
-  starter: {
-    title: "Khởi đầu", price: "Miễn phí", action: "Chọn gói Khởi đầu",
-    features: ["1 website", "1.000 hội thoại AI mỗi tháng", "Lập chỉ mục 100 trang", "1 thành viên"],
-  },
-  growth: {
-    title: "Tăng trưởng", price: "2,4 triệu", suffix: "VNĐ/tháng", badge: "Phổ biến nhất",
-    action: "Chọn gói Tăng trưởng",
-    features: ["5 website", "10.000 hội thoại AI mỗi tháng", "Lập chỉ mục 2.000 trang", "5 thành viên và handoff"],
-  },
-  business: {
-    title: "Doanh nghiệp", price: "9,8 triệu", suffix: "VNĐ/tháng",
-    action: "Chọn gói Doanh nghiệp",
-    features: ["20 website", "100.000 hội thoại AI mỗi tháng", "Lập chỉ mục 20.000 trang", "20 thành viên và hỗ trợ ưu tiên"],
-  },
-  custom: {
-    title: "Tùy chỉnh", price: "Linh hoạt", action: "Liên hệ triển khai",
-    features: ["Kết nối API model riêng", "Tự chọn nhà cung cấp AI", "Hạn mức theo nhu cầu", "Hỗ trợ cấu hình và triển khai"],
-  },
-};
 
 export function SubscriptionModule() {
   const [data, setData] = useState<Summary | null>(null);
@@ -72,7 +51,7 @@ export function SubscriptionModule() {
   const load = useCallback(async () => {
     const [summaryResponse, plansResponse, requestsResponse] = await Promise.all([
       authFetch(`${API_BASE}/subscriptions/me`),
-      fetch(`${API_BASE}/subscriptions/plans`),
+      fetch(`${API_BASE}/subscriptions/plans`, { cache: "no-store" }),
       authFetch(`${API_BASE}/subscriptions/requests/me`),
     ]);
     if (!summaryResponse.ok) throw new Error("Không thể tải thông tin gói");
@@ -92,6 +71,21 @@ export function SubscriptionModule() {
     const frame = requestAnimationFrame(() => void load().catch((reason: Error) => setError(reason.message)));
     return () => cancelAnimationFrame(frame);
   }, [load]);
+
+  async function openPlanSelection() {
+    setSelectedPlan("");
+    setChangeQuote(null);
+    setPlans([]);
+    setError("");
+    setRequestOpen(true);
+    try {
+      const response = await fetch(`${API_BASE}/subscriptions/plans`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Không thể tải bảng giá. Vui lòng thử lại.");
+      setPlans(await response.json() as Plan[]);
+    } catch {
+      setError("Không thể tải bảng giá. Vui lòng đóng và mở lại hộp chọn gói.");
+    }
+  }
 
   async function submitRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -189,7 +183,7 @@ export function SubscriptionModule() {
       <section className="subscription-hero">
         <div><span>Gói hiện tại</span><h2>{data.plan.name}</h2><p>Trạng thái: {data.subscription.status}{data.subscription.expires_at ? ` · Hết hạn ${new Date(data.subscription.expires_at).toLocaleDateString("vi-VN")}` : ""}</p></div>
         <div><span>Kỳ sử dụng</span><strong>{data.period}</strong></div>
-        {user?.role === "user" && <button type="button" onClick={() => { setSelectedPlan(""); setChangeQuote(null); setRequestOpen(true); }}>Thay đổi gói</button>}
+        {user?.role === "user" && <button type="button" onClick={() => void openPlanSelection()}>Thay đổi gói</button>}
       </section>
       <section className="quota-grid">{Object.entries(data.resources).map(([key, resource]) =>
         <article className="quota-card" key={key}>
@@ -222,14 +216,13 @@ export function SubscriptionModule() {
       <button className="sites-modal-backdrop" onClick={() => setRequestOpen(false)} aria-label="Đóng" />
       <section className="sites-modal subscription-modal subscription-upgrade-modal" role="dialog" aria-modal="true">
         <div className="sites-modal-header"><div><h2>Thay đổi gói dịch vụ</h2><p>Gói hiện tại: {data.plan.name}</p></div><button onClick={() => setRequestOpen(false)}>×</button></div>
+        {error && <p className="subscription-error" role="alert">{error}</p>}
         <form onSubmit={submitRequest}>
           <div className="subscription-plan-options">{plans.map((plan) => {
-            const view = planPresentation[plan.key] || {
-              title: plan.name, price: "Liên hệ", action: `Chọn ${plan.name}`, features: [],
-            };
+            const view = planPresentation(plan);
             const current = plan.key === data.plan.key;
             const unavailable = plan.key === "starter" && data.plan.key !== "legacy";
-            return <label className={`subscription-plan-card ${plan.key === "growth" ? "featured" : ""} ${current ? "current" : ""} ${unavailable ? "current" : ""}`} key={plan.key}>
+            return <label className={`subscription-plan-card ${view.badge ? "featured" : ""} ${current ? "current" : ""} ${unavailable ? "current" : ""}`} key={plan.key}>
               {view.badge && <span className="subscription-plan-badge">{view.badge}</span>}
               <input type="radio" name="requested_plan" value={plan.key} required disabled={current || unavailable} checked={selectedPlan === plan.key} onChange={() => void selectPlan(plan.key)} />
               <span className="subscription-plan-card-body">
@@ -244,11 +237,11 @@ export function SubscriptionModule() {
             <span>Giá gói mới <b>{changeQuote.requested_price.toLocaleString("vi-VN")} VNĐ/tháng</b></span>
             {changeQuote.direction === "upgrade" ? <>
               <span>Phần chênh lệch còn lại trong kỳ <b>{changeQuote.subtotal.toLocaleString("vi-VN")} VNĐ</b></span>
-              <span>VAT (10%) <b>{changeQuote.vat.toLocaleString("vi-VN")} VNĐ</b></span>
+              <span>VAT <b>{changeQuote.vat.toLocaleString("vi-VN")} VNĐ</b></span>
               <strong>Thanh toán ngay <b>{changeQuote.total.toLocaleString("vi-VN")} VNĐ</b></strong>
             </> : <>
               <span>Phí kỳ tiếp theo <b>{changeQuote.subtotal.toLocaleString("vi-VN")} VNĐ</b></span>
-              <span>VAT (10%) <b>{changeQuote.vat.toLocaleString("vi-VN")} VNĐ</b></span>
+              <span>VAT <b>{changeQuote.vat.toLocaleString("vi-VN")} VNĐ</b></span>
               <strong>Thanh toán trước {changeQuote.total.toLocaleString("vi-VN")} VNĐ · Áp dụng từ {new Date(changeQuote.current_period_end).toLocaleDateString("vi-VN")}</strong>
             </>}
           </div>}

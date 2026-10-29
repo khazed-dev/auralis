@@ -90,7 +90,7 @@ async def require_plan(db, key: str, *, for_signup: bool = False) -> dict:
     plan = await get_plan(db, key)
     if not plan:
         raise HTTPException(status_code=404, detail="Không tìm thấy gói dịch vụ")
-    if for_signup and (not plan.get("allow_new_signup") or plan.get("requires_contact")):
+    if for_signup and (not plan.get("allow_new_signup") or plan.get("requires_contact") or plan.get("monthly_price") is None):
         raise HTTPException(status_code=400, detail="Gói này cần liên hệ tư vấn")
     return plan
 

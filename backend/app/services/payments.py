@@ -281,6 +281,7 @@ def public_order(
         "status": order["status"],
         "plan": order["plan"],
         "requested_plan": order["plan"],
+        "plan_name": (order.get("plan_snapshot") or {}).get("name") or order["plan"],
         "email": order["email"],
         "payment_method": "bank_transfer",
         "subtotal": order["subtotal"],
