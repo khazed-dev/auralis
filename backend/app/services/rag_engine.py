@@ -670,17 +670,22 @@ Return only the questions, one per line, no numbering:"""
         self,
         docs: List[Tuple[Document, float]]
     ) -> float:
-        """Calculate confidence score based on document relevance."""
+        """Heuristic retrieval confidence, not a probability of answer correctness."""
         if not docs:
             return 0.3  # Low confidence with no sources
-        
-        scores = [self._normalized_relevance(doc, score) for doc, score in docs]
-        avg_score = sum(scores) / len(scores)
-        
-        # Boost confidence if we have multiple sources
-        source_bonus = min(0.2, len(docs) * 0.05)
-        
-        return min(0.95, avg_score + source_bonus)
+
+        # Repeated content is not independent evidence, even under different URLs.
+        scores_by_content = {}
+        for doc, score in docs:
+            content = " ".join(doc.page_content.split())
+            if not content:
+                continue
+            relevance = self._normalized_relevance(doc, score)
+            scores_by_content[content] = max(scores_by_content.get(content, 0.0), relevance)
+
+        if not scores_by_content:
+            return 0.3
+        return min(0.95, sum(scores_by_content.values()) / len(scores_by_content))
 
 
 # Singleton instance

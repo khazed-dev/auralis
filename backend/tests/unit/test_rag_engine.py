@@ -551,20 +551,45 @@ class TestCalculateConfidence:
         
         assert confidence < 0.5
     
-    def test_calculate_confidence_source_bonus(self, rag_engine):
-        """More sources should increase confidence."""
-        single_doc = [(Document(page_content="Content"), 0.5)]
+    @pytest.mark.parametrize("same_source", [True, False])
+    def test_calculate_confidence_does_not_reward_source_count(self, rag_engine, same_source):
+        """Adding equally relevant chunks or URLs does not itself improve confidence."""
+        single_doc = [(Document(page_content="Content 0", metadata={"url": "https://example.com/0"}), 0.5)]
         multiple_docs = [
-            (Document(page_content="Content"), 0.5),
-            (Document(page_content="Content"), 0.5),
-            (Document(page_content="Content"), 0.5),
-            (Document(page_content="Content"), 0.5),
+            (Document(page_content=f"Content {index}", metadata={"url": f"https://example.com/{0 if same_source else index}"}), 0.5)
+            for index in range(4)
         ]
         
         single_confidence = rag_engine._calculate_confidence(single_doc)
         multi_confidence = rag_engine._calculate_confidence(multiple_docs)
         
-        assert multi_confidence > single_confidence
+        assert multi_confidence == pytest.approx(single_confidence)
+
+    @pytest.mark.parametrize("same_source", [True, False])
+    def test_calculate_confidence_ignores_duplicate_content(self, rag_engine, same_source):
+        strong = (Document(page_content="Warranty covers two years.", metadata={"url": "https://example.com/warranty"}), 0.2)
+        weak = (Document(page_content="Replacement needs an invoice.", metadata={"url": "https://example.com/returns"}), 1.2)
+        copies = [
+            (Document(page_content="  Warranty covers\n two years.  ", metadata={"url": "https://example.com/warranty" if same_source else f"https://mirror-{index}.example/policy"}), 0.2)
+            for index in range(4)
+        ]
+
+        expected = rag_engine._calculate_confidence([strong, weak])
+        assert rag_engine._calculate_confidence([strong, weak, *copies]) == pytest.approx(expected)
+
+    def test_calculate_confidence_keeps_best_duplicate_regardless_of_order(self, rag_engine):
+        strong = (Document(page_content="Same policy"), 0.2)
+        weaker_copy = (Document(page_content="Same policy"), 1.8)
+        other = (Document(page_content="Other policy"), 1.2)
+
+        expected = rag_engine._calculate_confidence([strong, other])
+        assert rag_engine._calculate_confidence([weaker_copy, strong, other]) == pytest.approx(expected)
+        assert rag_engine._calculate_confidence([other, strong, weaker_copy]) == pytest.approx(expected)
+
+    def test_calculate_confidence_ignores_empty_content(self, rag_engine):
+        empty = [(Document(page_content=" \n\t ", metadata={"url": f"https://example.com/{index}"}), 0.0) for index in range(4)]
+
+        assert rag_engine._calculate_confidence(empty) == rag_engine._calculate_confidence([])
     
     def test_calculate_confidence_max_cap(self, rag_engine):
         """Confidence should never exceed 0.95."""
