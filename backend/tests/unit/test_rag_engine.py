@@ -3,9 +3,12 @@ Unit tests for RAG Engine service.
 Tests query rewriting, document retrieval, grading, and response generation.
 """
 import pytest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from langchain_core.documents import Document
 
+from app.config import settings
+from app.database.vector_store import VectorStore
 from app.services.rag_engine import RAGEngine, get_rag_engine
 
 
@@ -236,6 +239,92 @@ class TestRetrieveDocuments:
         
         scores = [score for _, score in result]
         assert scores == sorted(scores)
+
+
+class TestGradeBeforeTopK:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("hybrid", [True, False])
+    async def test_retrieval_keeps_bounded_oversampled_pool(self, rag_engine, monkeypatch, hybrid):
+        monkeypatch.setattr(settings, "RAG_HYBRID_SEARCH", hybrid)
+        monkeypatch.setattr(settings, "RAG_RETRIEVAL_OVERSAMPLE", 3)
+        candidates = [
+            (Document(page_content=f"Candidate {index}"), index / 10)
+            for index in range(8)
+        ]
+        search = rag_engine.vector_store.hybrid_search_with_score if hybrid else rag_engine.vector_store.similarity_search_with_score
+        search.return_value = candidates
+
+        results = await rag_engine._retrieve_documents("query", k=2)
+
+        assert results == candidates[:6]
+        assert search.call_args.kwargs["k"] == 6
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("flow", ["chat", "stream"])
+    @pytest.mark.parametrize("all_rejected", [False, True])
+    async def test_chat_grades_lower_ranked_candidates_before_limiting_context(
+        self, rag_engine, monkeypatch, flow, all_rejected,
+    ):
+        monkeypatch.setattr(settings, "RETRIEVAL_K", 2)
+        monkeypatch.setattr(settings, "RAG_RETRIEVAL_OVERSAMPLE", 3)
+        monkeypatch.setattr(settings, "RAG_HYBRID_SEARCH", True)
+        monkeypatch.setattr(settings, "RAG_DENSE_WEIGHT", 0.65)
+        monkeypatch.setattr(settings, "RAG_KEYWORD_WEIGHT", 0.35)
+        monkeypatch.setattr(settings, "RAG_MAX_DENSE_DISTANCE", 1.25)
+        query = "alpha beta gamma delta epsilon zeta eta theta iota kappa"
+        relevant = [
+            Document(
+                page_content=f"Coverage exceptions duration notice {index}",
+                metadata={"url": f"https://example.com/good-{index}", "site_id": "site-1"},
+            ) for index in range(4)
+        ]
+        distractors = [
+            Document(
+                page_content=f"alpha unrelated handbook {index}",
+                metadata={"url": f"https://example.com/bad-{index}", "site_id": "site-1"},
+            ) for index in range(2)
+        ]
+        documents = relevant + distractors
+        dense_results = [
+            (doc, 1.8 if all_rejected else 1.0 + index / 100)
+            for index, doc in enumerate(relevant)
+        ] + [(doc, 1.9) for doc in distractors]
+        store = VectorStore.__new__(VectorStore)
+        store._initialized = True
+        store.vector_store = SimpleNamespace(
+            index=SimpleNamespace(ntotal=len(documents)),
+            docstore=SimpleNamespace(_dict={str(index): doc for index, doc in enumerate(documents)}),
+            similarity_search_with_score=lambda _query, k: dense_results[:k],
+        )
+        rag_engine.vector_store = store
+        # Real hybrid fusion ranks weak lexical hits ahead of the semantic hits.
+        ranked = store.hybrid_search_with_score(query, k=6, filter={"site_id": "site-1"})
+        if not all_rejected:
+            assert all("/bad-" in doc.metadata["url"] for doc, _ in ranked[:2])
+
+        database = MagicMock()
+        database.db.sites.find_one = AsyncMock(return_value={"url": "https://example.com", "name": "Fixture"})
+        database.get_conversation_history = AsyncMock(return_value=[])
+        database.get_qa_for_rag = AsyncMock(return_value=[])
+        database.save_message = AsyncMock()
+        monkeypatch.setattr("app.services.rag_engine.get_mongodb", AsyncMock(return_value=database))
+        rag_engine._build_context = MagicMock(wraps=rag_engine._build_context)
+
+        async def generate_stream(*_args, **_kwargs):
+            yield "Generated response"
+
+        if flow == "stream":
+            rag_engine.llm.generate_stream = generate_stream
+            output = [part async for part in rag_engine.chat_stream(query, "session", site_id="site-1")]
+            assert output == ["Generated response"]
+        else:
+            response = await rag_engine.chat(query, "session", site_id="site-1")
+            assert response.answer == "Generated response"
+
+        selected = rag_engine._build_context.call_args.args[0]
+        expected_urls = [] if all_rejected else ["https://example.com/good-0", "https://example.com/good-1"]
+        assert [doc.metadata["url"] for doc, _ in selected] == expected_urls
+        assert len(selected) <= settings.RETRIEVAL_K
 
 
 # ==================== _grade_documents Tests ====================

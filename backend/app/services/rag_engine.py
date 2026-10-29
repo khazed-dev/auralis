@@ -248,6 +248,7 @@ class RAGEngine:
             
             # 5. Grade documents for relevance
             relevant_docs = await self._grade_documents(rewritten_query, retrieved_docs)
+            relevant_docs = relevant_docs[:settings.RETRIEVAL_K]
             
             # 6. Build context from relevant docs
             context, sources = self._build_context(relevant_docs)
@@ -326,6 +327,7 @@ class RAGEngine:
                 site_id=site_id,
             )
             relevant_docs = await self._grade_documents(rewritten_query, retrieved_docs)
+            relevant_docs = relevant_docs[:settings.RETRIEVAL_K]
             context, sources = self._build_context(relevant_docs)
 
             prompt = self._build_prompt(message, context, history)
@@ -438,7 +440,8 @@ Rewritten search query (just the query, no explanation):"""
                 results = filtered_results
                 logger.info(f"Filtered to {len(results)} docs for site: {sf}")
             results.sort(key=lambda x: x[1])
-            return results[:k_val]
+            # Keep spare candidates so grading can replace rejected top hits.
+            return results[:k_val * oversample]
 
         return await asyncio.to_thread(_sync_retrieve)
     
