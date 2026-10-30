@@ -2,10 +2,12 @@
 Admin API routes.
 """
 from fastapi import APIRouter, HTTPException, Depends
+import asyncio
 from loguru import logger
 
 from app.models.schemas import HealthCheck, SystemStats
 from app.database import get_mongodb, get_vector_store
+from app.database.vector_store import run_vector_write
 from app.services.ollama import get_ollama_service
 from app.config import settings
 from app.routes.auth import require_admin
@@ -33,8 +35,8 @@ async def health_check():
         
         # Check Vector Store
         try:
-            vector_store = get_vector_store()
-            stats = vector_store.get_collection_stats()
+            vector_store = await asyncio.to_thread(get_vector_store)
+            stats = await asyncio.to_thread(vector_store.get_collection_stats)
             vector_store_status = f"healthy ({stats['count']} documents)"
         except Exception as e:
             vector_store_status = f"unhealthy: {str(e)}"
@@ -79,11 +81,11 @@ async def get_stats(_admin: dict = Depends(require_admin)):
     """
     try:
         mongodb = await get_mongodb()
-        vector_store = get_vector_store()
+        vector_store = await asyncio.to_thread(get_vector_store)
         
         # Get counts
         page_count = await mongodb.get_page_count()
-        vector_stats = vector_store.get_collection_stats()
+        vector_stats = await asyncio.to_thread(vector_store.get_collection_stats)
         
         # Get conversation stats
         conversations = await mongodb.get_all_sessions(limit=1000)
@@ -156,7 +158,7 @@ async def clear_all_data(_admin: dict = Depends(require_admin)):
     """
     try:
         mongodb = await get_mongodb()
-        vector_store = get_vector_store()
+        vector_store = await asyncio.to_thread(get_vector_store)
         
         # Clear collections
         await mongodb.db.conversations.delete_many({})
@@ -165,7 +167,7 @@ async def clear_all_data(_admin: dict = Depends(require_admin)):
         await mongodb.db.long_term_memory.delete_many({})
         
         # Clear vector store
-        vector_store.clear_collection()
+        await run_vector_write(vector_store.clear_collection)
         
         return {"success": True, "message": "All data cleared"}
         

@@ -109,12 +109,13 @@ async def _execute_crawl_job(
             start_url=site_url,
             max_pages=max_pages,
             include_patterns=include_patterns,
-            exclude_patterns=exclude_patterns
+            exclude_patterns=exclude_patterns,
+            job_id=job_id,
         )
         
         if pages:
             indexer = IndexerService()
-            stats = await indexer.index_pages(pages, site_id=site_id)
+            stats = await indexer.index_pages(pages, site_id=site_id, job_id=job_id)
             indexed_count = stats.get("indexed_pages", 0)
             
             await db.update_crawl_job(
@@ -139,6 +140,8 @@ async def _execute_crawl_job(
         
         logger.info(f"Crawl job {job_id} completed for site {site_id}")
         
+    except CrawlCancelled:
+        logger.info(f"Crawl job {job_id} cancelled")
     except Exception as e:
         logger.error(f"Crawl job {job_id} failed: {e}")
         await db.update_crawl_job(

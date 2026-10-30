@@ -12,6 +12,7 @@ Provider Architecture:
 - Cache: Memory (extensible to Redis)
 """
 from contextlib import asynccontextmanager
+import asyncio
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -128,7 +129,7 @@ async def lifespan(app: FastAPI):
                 logger.info(f"Backfilled widget domain allow-list for {migrated} sites")
         
         # Initialize Vector Store
-        get_vector_store()
+        await asyncio.to_thread(get_vector_store)
         logger.info("Vector store initialized")
         
         # Ensure default admin exists (if configured)

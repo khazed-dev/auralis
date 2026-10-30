@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from loguru import logger
 
 from app.models.schemas import CrawlRequest, CrawlResponse, CrawlStatus, PageInfo
-from app.services.crawler import CrawlerService
+from app.services.crawler import CrawlerService, CrawlCancelled
 from app.services.indexer import IndexerService
 from app.database import get_mongodb, get_vector_store
 from app.config import settings
@@ -54,6 +54,8 @@ async def _crawl_and_index(
         
         logger.info(f"Crawl job {job_id} completed: {stats}")
         
+    except CrawlCancelled:
+        logger.info(f"Crawl job {job_id} cancelled")
     except Exception as e:
         logger.error(f"Crawl job {job_id} failed: {e}")
         await mongodb.update_crawl_job(job_id, status="failed", error=str(e))

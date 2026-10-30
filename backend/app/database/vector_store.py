@@ -5,6 +5,9 @@ import os
 import math
 import re
 import unicodedata
+import asyncio
+from functools import wraps
+from threading import Lock, RLock
 from collections import Counter
 from typing import List, Dict, Optional
 from langchain_community.vectorstores import FAISS
@@ -52,10 +55,38 @@ _TRANSIENT_RETRIEVAL_KEYS = {
 }
 
 
+def _index_locked(method):
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        if not self._initialized:
+            self.initialize()
+        with self._index_lock:
+            return method(self, *args, **kwargs)
+    return locked
+
+
+async def run_vector_write(operation, *args, **kwargs):
+    """Finish an in-flight write before shutdown can requeue its job."""
+    task = asyncio.create_task(asyncio.to_thread(operation, *args, **kwargs))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        try:
+            await task
+        except Exception:
+            logger.exception("Vector write failed while its caller was shutting down")
+        raise
+
+
 class VectorStore:
     """FAISS vector store with HuggingFace embeddings."""
     
     def __init__(self):
+        # shortcut: locks protect one process; retain one API worker until
+        # the index is served by a store shared across multiple processes.
+        self._index_lock = RLock()
+        self._embedding_lock = Lock()
+        self._init_lock = RLock()
         self.embeddings = None
         self.vector_store = None
         self._initialized = False
@@ -66,6 +97,10 @@ class VectorStore:
         )
     
     def initialize(self):
+        with self._init_lock:
+            self._initialize()
+
+    def _initialize(self):
         """Initialize the vector store and embeddings."""
         if self._initialized:
             return
@@ -112,8 +147,9 @@ class VectorStore:
     
     def _save_index(self):
         """Save the FAISS index to disk."""
-        if self.vector_store:
-            self.vector_store.save_local(self.index_path)
+        with self._index_lock:
+            if self.vector_store:
+                self.vector_store.save_local(self.index_path)
     
     def add_documents(self, documents: List[Document]) -> List[str]:
         """Add documents to the vector store."""
@@ -125,10 +161,17 @@ class VectorStore:
                 return []
             
             # Add documents
-            ids = self.vector_store.add_documents(documents)
-            
-            # Save to disk
-            self._save_index()
+            texts = [doc.page_content for doc in documents]
+            vectors = self.embed_documents(texts)
+            if len(vectors) != len(documents):
+                raise ValueError("Embedding count does not match document count")
+            with self._index_lock:
+                ids = self.vector_store.add_embeddings(
+                    list(zip(texts, vectors)),
+                    metadatas=[dict(doc.metadata) for doc in documents],
+                )
+                # Save to disk
+                self._save_index()
             
             logger.info(f"Added {len(documents)} documents to vector store")
             return ids
@@ -136,6 +179,43 @@ class VectorStore:
             logger.error(f"Failed to add documents: {e}")
             raise
     
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        if not self._initialized:
+            self.initialize()
+        with self._embedding_lock:
+            return self.embeddings.embed_documents(texts)
+
+    def embed_query(self, query: str) -> List[float]:
+        if not self._initialized:
+            self.initialize()
+        with self._embedding_lock:
+            return self.embeddings.embed_query(query)
+
+    def replace_documents(self, documents: List[Document], filter: Dict) -> List[str]:
+        """Prepare embeddings before replacing one page under the index lock."""
+        if not filter:
+            raise ValueError("A metadata filter is required to replace documents")
+        if not documents:
+            return []
+        texts = [doc.page_content for doc in documents]
+        vectors = self.embed_documents(texts)
+        if len(vectors) != len(documents):
+            raise ValueError("Embedding count does not match document count")
+        with self._index_lock:
+            old_ids = [
+                key for key, doc in self.vector_store.docstore._dict.items()
+                if isinstance(doc, Document) and self._matches_filter(doc, filter)
+            ]
+            # Keep old chunks until embedding and insertion have succeeded.
+            ids = self.vector_store.add_embeddings(
+                list(zip(texts, vectors)),
+                metadatas=[dict(doc.metadata) for doc in documents],
+            )
+            if old_ids:
+                self.vector_store.delete(ids=old_ids)
+            self._save_index()
+            return ids
+
     def similarity_search(
         self,
         query: str,
@@ -151,11 +231,13 @@ class VectorStore:
         try:
             # Fetch before filtering. Filtering only the unscoped top-k can return
             # no hits for a tenant even when matching documents exist lower down.
-            fetch_k = k
-            if filter:
-                ntotal = int(getattr(self.vector_store.index, "ntotal", 0) or 0)
-                fetch_k = min(ntotal, max(k, settings.RAG_MAX_CANDIDATES))
-            results = self.vector_store.similarity_search(query, k=fetch_k)
+            embedding = self.embed_query(query)
+            with self._index_lock:
+                fetch_k = k
+                if filter:
+                    ntotal = int(getattr(self.vector_store.index, "ntotal", 0) or 0)
+                    fetch_k = min(ntotal, max(k, settings.RAG_MAX_CANDIDATES))
+                results = self.vector_store.similarity_search_by_vector(embedding, k=fetch_k)
             
             # Apply filter if provided
             if filter:
@@ -182,11 +264,13 @@ class VectorStore:
         k = k or settings.RETRIEVAL_K
         
         try:
-            fetch_k = k
-            if filter:
-                ntotal = int(getattr(self.vector_store.index, "ntotal", 0) or 0)
-                fetch_k = min(ntotal, max(k, settings.RAG_MAX_CANDIDATES))
-            results = self.vector_store.similarity_search_with_score(query, k=fetch_k)
+            embedding = self.embed_query(query)
+            with self._index_lock:
+                fetch_k = k
+                if filter:
+                    ntotal = int(getattr(self.vector_store.index, "ntotal", 0) or 0)
+                    fetch_k = min(ntotal, max(k, settings.RAG_MAX_CANDIDATES))
+                results = self.vector_store.similarity_search_with_score_by_vector(embedding, k=fetch_k)
             
             # Apply filter if provided
             if filter:
@@ -239,14 +323,6 @@ class VectorStore:
 
         k = k or settings.RETRIEVAL_K
         max_candidates = max(k, settings.RAG_MAX_CANDIDATES)
-        ntotal = int(getattr(self.vector_store.index, "ntotal", 0) or 0)
-        dense_k = min(ntotal, max_candidates)
-        dense_results = (
-            self.vector_store.similarity_search_with_score(query, k=dense_k)
-            if dense_k
-            else []
-        )
-
         def in_scope(doc: Document) -> bool:
             if not self._matches_filter(doc, filter):
                 return False
@@ -256,10 +332,14 @@ class VectorStore:
                     return False
             return doc.metadata.get("source") != "init"
 
-        dense_results = [(doc, score) for doc, score in dense_results if in_scope(doc)]
-
-        docstore = getattr(self.vector_store.docstore, "_dict", {})
-        corpus = [doc for doc in docstore.values() if isinstance(doc, Document) and in_scope(doc)]
+        embedding = self.embed_query(query)
+        with self._index_lock:
+            ntotal = int(getattr(self.vector_store.index, "ntotal", 0) or 0)
+            dense_k = min(ntotal, max_candidates)
+            dense_results = self.vector_store.similarity_search_with_score_by_vector(embedding, k=dense_k) if dense_k else []
+            dense_results = [(doc, score) for doc, score in dense_results if in_scope(doc)]
+            docstore = getattr(self.vector_store.docstore, "_dict", {})
+            corpus = [doc for doc in docstore.values() if isinstance(doc, Document) and in_scope(doc)]
         query_tokens = search_tokens(query, drop_stopwords=True)
         query_counts = Counter(query_tokens)
         unique_query_tokens = set(query_tokens)
@@ -374,6 +454,7 @@ class VectorStore:
             results.append((result_doc, 1.0 - item["score"] / best))
         return results
     
+    @_index_locked
     def delete_by_metadata(self, filter: Dict) -> bool:
         """Delete documents by metadata filter."""
         if not self._initialized:
@@ -396,6 +477,7 @@ class VectorStore:
             logger.error(f"Failed to delete documents: {e}")
             return False
 
+    @_index_locked
     def get_documents_by_metadata(
         self,
         filter: Dict,
@@ -430,6 +512,7 @@ class VectorStore:
             for doc in documents[:safe_limit]
         ]
 
+    @_index_locked
     def count_unique_metadata_values(
         self,
         field: str,
@@ -458,24 +541,23 @@ class VectorStore:
             self.initialize()
         
         try:
-            # Remove the index file and reinitialize
-            if os.path.exists(self.index_path):
-                import shutil
-                shutil.rmtree(self.index_path, ignore_errors=True)
-            
+            # Prepare the empty index before replacing the existing files.
+            vectors = self.embed_documents(["Initial document"])
             # Reinitialize with empty index
-            self.vector_store = FAISS.from_texts(
-                ["Initial document"],
-                self.embeddings,
-                metadatas=[{"source": "init"}]
-            )
-            self._save_index()
+            with self._index_lock:
+                self.vector_store = FAISS.from_embeddings(
+                    [("Initial document", vectors[0])],
+                    self.embeddings,
+                    metadatas=[{"source": "init"}],
+                )
+                self._save_index()
             
             logger.info("Cleared vector store collection")
         except Exception as e:
             logger.error(f"Failed to clear collection: {e}")
             raise
     
+    @_index_locked
     def get_collection_stats(self) -> Dict:
         """Get statistics about the collection."""
         if not self._initialized:
@@ -494,12 +576,16 @@ class VectorStore:
 
 # Singleton instance
 _vector_store: Optional[VectorStore] = None
+_vector_store_lock = Lock()
 
 
 def get_vector_store() -> VectorStore:
     """Get or create VectorStore instance."""
     global _vector_store
     if _vector_store is None:
-        _vector_store = VectorStore()
-        _vector_store.initialize()
+        with _vector_store_lock:
+            if _vector_store is None:
+                candidate = VectorStore()
+                candidate.initialize()
+                _vector_store = candidate
     return _vector_store

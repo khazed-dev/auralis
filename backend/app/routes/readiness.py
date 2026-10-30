@@ -21,13 +21,13 @@ async def readiness():
         pass
 
     store = vector_store._vector_store
-    vector_ready = bool(
-        store is not None
-        and store._initialized
-        and store.embeddings is not None
-        and store.vector_store is not None
-        and store.vector_store.index.ntotal > 0
-    )
+    vector_ready = False
+    if store is not None and store._initialized and store.embeddings is not None and store.vector_store is not None:
+        try:
+            stats = await asyncio.wait_for(asyncio.to_thread(store.get_collection_stats), timeout=3)
+            vector_ready = stats.get("count", 0) > 0
+        except Exception:
+            pass
     commit_file = Path(__file__).resolve().parents[3] / "COMMIT"
     ready = database_ready and vector_ready
     return JSONResponse(

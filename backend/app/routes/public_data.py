@@ -1,6 +1,7 @@
 """Public, read-only view of crawled pages and their FAISS chunks."""
 
 import re
+import asyncio
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -74,7 +75,8 @@ async def list_public_crawled_data(
     )
     pages = await cursor.to_list(length=per_page)
 
-    vector_stats = get_vector_store().get_collection_stats()
+    vector_store = await asyncio.to_thread(get_vector_store)
+    vector_stats = await asyncio.to_thread(vector_store.get_collection_stats)
     return {
         "items": [_public_page(item) for item in pages],
         "pagination": {
@@ -105,10 +107,8 @@ async def list_public_page_chunks(
         raise HTTPException(status_code=404, detail="Không tìm thấy trang đã crawl")
 
     try:
-        documents = get_vector_store().get_documents_by_metadata(
-            {"url": url},
-            limit=200,
-        )
+        vector_store = await asyncio.to_thread(get_vector_store)
+        documents = await asyncio.to_thread(vector_store.get_documents_by_metadata, {"url": url}, limit=200)
     except Exception as exc:
         logger.error(f"Could not read public FAISS chunks for {url}: {exc}")
         raise HTTPException(
