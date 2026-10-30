@@ -20,6 +20,7 @@ async def test_readiness_requires_mongodb_and_loaded_faiss(monkeypatch, tmp_path
     monkeypatch.setattr(module.vector_store, "_vector_store", SimpleNamespace(
         _initialized=vector_ok, embeddings=object(),
         vector_store=SimpleNamespace(index=SimpleNamespace(ntotal=1)),
+        get_collection_stats=lambda: {"count": 1},
     ))
     app = FastAPI()
     app.include_router(module.router)

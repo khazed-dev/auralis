@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 from app.config import settings
 from app.database import get_mongodb
-from app.services.crawler import CrawlerService
+from app.services.crawler import CrawlerService, CrawlCancelled
 from app.services.indexer import IndexerService
 from app.database.vector_store import get_vector_store
 from app.routes.auth import get_current_user, require_auth
@@ -184,6 +184,8 @@ async def crawl_and_index_site(url: str, site_id: str, max_pages: int = 50):
         
         logger.info(f"Completed crawl for site: {url}, indexed {stats.get('indexed_pages', 0)} pages")
         
+    except CrawlCancelled:
+        logger.info(f"Crawl for site {site_id} cancelled")
     except Exception as e:
         logger.error(f"Error crawling site {url}: {e}")
         if job_id:

@@ -4,10 +4,11 @@ Sites API routes for managing chatbot sites.
 from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import List, Optional
 from datetime import datetime
+import asyncio
 from loguru import logger
 
 from app.database import get_mongodb
-from app.database.vector_store import get_vector_store
+from app.database.vector_store import get_vector_store, run_vector_write
 from app.routes.auth import require_auth, get_current_user
 from app.core.site_access import can_manage_site, can_view_site, is_admin, is_agent
 from app.models.schemas import SiteConfig, SiteConfigUpdate, SiteQuickPromptsConfig
@@ -32,7 +33,7 @@ async def list_sites(user: dict = Depends(require_auth)):
     
     result = []
     try:
-        vector_store = get_vector_store()
+        vector_store = await asyncio.to_thread(get_vector_store)
     except Exception as exc:
         logger.warning(f"Vector store unavailable while listing sites: {exc}")
         vector_store = None
@@ -42,7 +43,7 @@ async def list_sites(user: dict = Depends(require_auth)):
         
         job = await db.get_crawl_job_by_url(site_url) if hasattr(db, 'get_crawl_job_by_url') else None
         total_pages = (
-            vector_store.count_unique_metadata_values("url", {"site_id": site_id})
+            await asyncio.to_thread(vector_store.count_unique_metadata_values, "url", {"site_id": site_id})
             if vector_store else 0
         )
         
@@ -77,9 +78,8 @@ async def get_site(site_id: str, user: dict = Depends(require_auth)):
     
     job = await db.get_crawl_job_by_url(site.get("url", "")) if hasattr(db, 'get_crawl_job_by_url') else None
     try:
-        total_pages = get_vector_store().count_unique_metadata_values(
-            "url", {"site_id": site_id}
-        )
+        vector_store = await asyncio.to_thread(get_vector_store)
+        total_pages = await asyncio.to_thread(vector_store.count_unique_metadata_values, "url", {"site_id": site_id})
     except Exception as exc:
         logger.warning(f"Vector store unavailable for site {site_id}: {exc}")
         total_pages = 0
@@ -131,8 +131,8 @@ async def delete_site(site_id: str, user: dict = Depends(require_auth)):
         await db.delete_site(site_id)
         
         try:
-            vector_store = get_vector_store()
-            vector_store.delete_by_metadata({"site_id": site_id})
+            vector_store = await asyncio.to_thread(get_vector_store)
+            await run_vector_write(vector_store.delete_by_metadata, {"site_id": site_id})
         except Exception as e:
             logger.warning(f"Could not delete vectors for site {url}: {e}")
         

@@ -2,12 +2,15 @@
 Indexer service for chunking and storing documents.
 """
 from typing import List, Dict, Optional
+import asyncio
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from loguru import logger
 
 from app.config import settings
 from app.database import get_mongodb, get_vector_store
+from app.database.vector_store import run_vector_write
+from app.services.crawler import CrawlCancelled
 
 
 class IndexerService:
@@ -38,7 +41,7 @@ class IndexerService:
         Returns:
             Indexing statistics
         """
-        vector_store = get_vector_store()
+        vector_store = await asyncio.to_thread(get_vector_store)
         mongodb = await get_mongodb()
         
         total_chunks = 0
@@ -47,6 +50,10 @@ class IndexerService:
         
         for page in pages:
             try:
+                if job_id:
+                    job = await mongodb.get_crawl_job(job_id)
+                    if job and job.get("status") == "cancelled":
+                        raise CrawlCancelled("Crawl cancelled by user")
                 # Create chunks
                 chunks = self._create_chunks(page, site_id=site_id)
                 
@@ -58,10 +65,8 @@ class IndexerService:
                 delete_filter = {"url": page["url"]}
                 if site_id:
                     delete_filter["site_id"] = site_id
-                vector_store.delete_by_metadata(delete_filter)
-
-                # Add to vector store
-                vector_store.add_documents(chunks)
+                # Add to vector store, replacing the page in one locked write.
+                await run_vector_write(vector_store.replace_documents, chunks, delete_filter)
                 
                 # Save page metadata to MongoDB
                 await mongodb.save_page(
@@ -89,6 +94,8 @@ class IndexerService:
                 
                 logger.info(f"Indexed: {page['url']} ({len(chunks)} chunks)")
                 
+            except CrawlCancelled:
+                raise
             except Exception as e:
                 error_msg = f"Error indexing {page.get('url', 'unknown')}: {str(e)}"
                 errors.append(error_msg)
@@ -142,10 +149,10 @@ class IndexerService:
     async def reindex_all(self) -> Dict:
         """Reindex all pages from MongoDB."""
         mongodb = await get_mongodb()
-        vector_store = get_vector_store()
+        vector_store = await asyncio.to_thread(get_vector_store)
         
         # Clear existing vectors
-        vector_store.clear_collection()
+        await run_vector_write(vector_store.clear_collection)
         
         # Get all pages from MongoDB
         pages = await mongodb.get_all_pages()
@@ -171,11 +178,11 @@ class IndexerService:
     
     async def delete_page_index(self, url: str) -> bool:
         """Delete a page's index from the vector store."""
-        vector_store = get_vector_store()
+        vector_store = await asyncio.to_thread(get_vector_store)
         mongodb = await get_mongodb()
         
         # Delete from vector store
-        vector_store.delete_by_metadata({"url": url})
+        await run_vector_write(vector_store.delete_by_metadata, {"url": url})
         
         # Delete from MongoDB
         await mongodb.delete_page(url)

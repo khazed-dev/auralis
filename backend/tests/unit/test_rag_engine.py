@@ -87,6 +87,8 @@ class TestQAMatching:
         embeddings.embed_documents.return_value = [[1.0, 0.0], [0.0, 1.0]]
         embeddings.embed_query.return_value = [1.0, 0.0]
         rag_engine.vector_store.embeddings = embeddings
+        rag_engine.vector_store.embed_documents = embeddings.embed_documents
+        rag_engine.vector_store.embed_query = embeddings.embed_query
         mongodb = MagicMock()
         mongodb.get_qa_for_rag = AsyncMock(
             return_value=[
@@ -289,12 +291,13 @@ class TestGradeBeforeTopK:
             (doc, 1.8 if all_rejected else 1.0 + index / 100)
             for index, doc in enumerate(relevant)
         ] + [(doc, 1.9) for doc in distractors]
-        store = VectorStore.__new__(VectorStore)
+        store = VectorStore()
         store._initialized = True
+        store.embeddings = SimpleNamespace(embed_query=lambda query: [1.0, 0.0])
         store.vector_store = SimpleNamespace(
             index=SimpleNamespace(ntotal=len(documents)),
             docstore=SimpleNamespace(_dict={str(index): doc for index, doc in enumerate(documents)}),
-            similarity_search_with_score=lambda _query, k: dense_results[:k],
+            similarity_search_with_score_by_vector=lambda _embedding, k: dense_results[:k],
         )
         rag_engine.vector_store = store
         # Real hybrid fusion ranks weak lexical hits ahead of the semantic hits.

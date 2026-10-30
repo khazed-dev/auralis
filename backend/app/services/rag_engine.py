@@ -179,7 +179,7 @@ class RAGEngine:
         try:
             # Get embeddings for Q&A questions if not cached
             if site_id not in self._qa_embeddings_cache:
-                embeddings_model = self.vector_store.embeddings
+                embeddings_model = self.vector_store
                 valid_pairs = [qa for qa in qa_pairs if (qa.get("question") or "").strip()]
                 qa_ids = [qa["id"] for qa in valid_pairs]
                 questions = [qa["question"] for qa in valid_pairs]
@@ -211,7 +211,7 @@ class RAGEngine:
                 return None
             
             # Get query embedding
-            embeddings_model = self.vector_store.embeddings
+            embeddings_model = self.vector_store
             query_embedding = np.asarray(
                 await asyncio.to_thread(embeddings_model.embed_query, query),
                 dtype=np.float32,

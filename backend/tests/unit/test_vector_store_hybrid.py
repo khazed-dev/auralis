@@ -7,14 +7,15 @@ from app.database.vector_store import VectorStore
 
 
 def _store_with(documents, dense_results):
-    store = VectorStore.__new__(VectorStore)
+    store = VectorStore()
     store._initialized = True
+    store.embeddings = SimpleNamespace(embed_query=lambda query: [1.0, 0.0])
     store.vector_store = SimpleNamespace(
         index=SimpleNamespace(ntotal=len(documents)),
         docstore=SimpleNamespace(
             _dict={str(index): doc for index, doc in enumerate(documents)}
         ),
-        similarity_search_with_score=lambda query, k: dense_results[:k],
+        similarity_search_with_score_by_vector=lambda embedding, k: dense_results[:k],
     )
     return store
 

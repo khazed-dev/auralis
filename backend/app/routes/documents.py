@@ -2,6 +2,7 @@
 Document upload and management API routes.
 """
 import os
+import asyncio
 import uuid
 from typing import List, Optional
 from datetime import datetime
@@ -10,6 +11,7 @@ from pydantic import BaseModel
 from loguru import logger
 
 from app.database import get_mongodb, get_vector_store
+from app.database.vector_store import run_vector_write
 from app.services.document_processor import get_document_processor, DocumentProcessor
 from app.services.indexer import get_indexer_service
 from app.routes.auth import require_auth
@@ -168,7 +170,6 @@ async def index_documents(documents: List[dict], site_id: str):
     """Index uploaded documents into the vector store."""
     mongodb = await get_mongodb()
     indexer = get_indexer_service()
-    vector_store = get_vector_store()
     
     for doc in documents:
         try:
@@ -254,7 +255,7 @@ async def delete_document(
 ):
     """Delete a document from a site."""
     mongodb = await get_mongodb()
-    vector_store = get_vector_store()
+    vector_store = await asyncio.to_thread(get_vector_store)
     
     # Verify site access
     site = await mongodb.db.sites.find_one({"site_id": site_id})
@@ -273,7 +274,7 @@ async def delete_document(
     # Delete from vector store
     try:
         doc_url = f"doc://{site_id}/{doc_id}"
-        vector_store.delete_by_metadata({"url": doc_url})
+        await run_vector_write(vector_store.delete_by_metadata, {"url": doc_url})
     except Exception as e:
         logger.warning(f"Error deleting document vectors: {e}")
     

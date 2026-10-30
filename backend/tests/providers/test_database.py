@@ -938,7 +938,7 @@ class TestVectorStoreOperations:
                     with patch("os.path.exists", return_value=False):
                         with patch("os.makedirs"):
                             mock_vs_instance = MagicMock()
-                            mock_vs_instance.add_documents.return_value = ["id1", "id2"]
+                            mock_vs_instance.add_embeddings.return_value = ["id1", "id2"]
                             mock_faiss.from_texts.return_value = mock_vs_instance
                             mock_embeddings.return_value = MagicMock()
                             
@@ -955,10 +955,15 @@ class TestVectorStoreOperations:
                             mock_doc2 = MagicMock()
                             mock_doc2.page_content = "Doc 2"
                             mock_doc2.metadata = {"source": "test"}
+                            vs.embeddings.embed_documents.return_value = [[1.0, 0.0], [0.0, 1.0]]
                             
                             ids = vs.add_documents([mock_doc1, mock_doc2])
                             
                             assert ids == ["id1", "id2"]
+                            mock_vs_instance.add_embeddings.assert_called_once_with(
+                                [("Doc 1", [1.0, 0.0]), ("Doc 2", [0.0, 1.0])],
+                                metadatas=[{"source": "test"}, {"source": "test"}],
+                            )
     
     def test_vector_store_similarity_search(self, mock_torch_multiprocessing):
         """Test similarity search."""
@@ -978,7 +983,7 @@ class TestVectorStoreOperations:
                             mock_doc2.metadata = {}
                             
                             mock_vs_instance = MagicMock()
-                            mock_vs_instance.similarity_search.return_value = [mock_doc1, mock_doc2]
+                            mock_vs_instance.similarity_search_by_vector.return_value = [mock_doc1, mock_doc2]
                             mock_faiss.from_texts.return_value = mock_vs_instance
                             mock_embeddings.return_value = MagicMock()
                             
@@ -989,10 +994,11 @@ class TestVectorStoreOperations:
                             vs.vector_store = mock_vs_instance
                             vs._initialized = True
                             
+                            vs.embeddings.embed_query.return_value = [1.0, 0.0]
                             results = vs.similarity_search("test query", k=2)
                             
                             assert len(results) == 2
-                            mock_vs_instance.similarity_search.assert_called_once_with("test query", k=2)
+                            mock_vs_instance.similarity_search_by_vector.assert_called_once_with([1.0, 0.0], k=2)
     
     def test_vector_store_get_collection_stats(self, mock_torch_multiprocessing):
         """Test getting collection stats."""
