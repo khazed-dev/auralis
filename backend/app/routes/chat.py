@@ -7,7 +7,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from loguru import logger
 
-from app.models.schemas import ChatRequest, ChatResponse, ConversationHistory, Message
+from app.models.schemas import ChatRequest, ChatResponse, ConversationHistory, Message, DEFAULT_HANDOFF_PHRASES
 from app.services.rag_engine import RAGEngine, get_rag_engine
 from app.database import get_mongodb
 from app.config import settings
@@ -51,7 +51,7 @@ async def _authorized_conversation(mongodb, session_id: str, user: dict, *, mana
     return conversation
 
 
-async def check_handoff_suggestion(site_id: str, answer: str, confidence: float) -> tuple[bool, str]:
+async def check_handoff_suggestion(site_id: str, answer: str, confidence: float) -> tuple[bool, str | None]:
     """Check if handoff should be suggested based on confidence and response content."""
     mongodb = await get_mongodb()
     
@@ -61,19 +61,17 @@ async def check_handoff_suggestion(site_id: str, answer: str, confidence: float)
         return False, None
     
     threshold = config.get("confidence_threshold", 0.3)
-    auto_phrases = config.get("auto_suggest_phrases", [
-        "I'm not sure",
-        "I don't have information",
-        "I cannot help with",
-        "please contact support"
-    ])
+    auto_phrases = config.get("auto_suggest_phrases")
+    if auto_phrases is None:
+        auto_phrases = DEFAULT_HANDOFF_PHRASES
     
     if confidence < threshold:
         return True, "low_confidence"
     
-    answer_lower = answer.lower()
+    answer_lower = " ".join(answer.casefold().split())
     for phrase in auto_phrases:
-        if phrase.lower() in answer_lower:
+        normalized_phrase = " ".join(phrase.casefold().split())
+        if normalized_phrase and normalized_phrase in answer_lower:
             return True, "uncertain_response"
     
     return False, None
@@ -170,6 +168,12 @@ async def preview_chat(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+def _sse_data(text: str) -> str:
+    # SSE joins data lines with newlines; raw text must not create event fields.
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return "".join(f"data: {line}\n" for line in normalized.split("\n")) + "\n"
+
+
 @router.post("/stream")
 @limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/minute")
 async def chat_stream(request: Request, body: ChatRequest):
@@ -196,13 +200,13 @@ async def chat_stream(request: Request, body: ChatRequest):
                     user_id=None,
                     site_id=body.site_id,
                 ):
-                    yield f"data: {chunk}\n\n"
+                    yield _sse_data(chunk)
                 if owner_id:
                     await increment_usage(mongodb, owner_id, "messages")
                     await record_model_usage(mongodb, owner_id, tenant_llm)
                 yield "data: [DONE]\n\n"
             except Exception as e:
-                yield f"data: Error: {str(e)}\n\n"
+                yield _sse_data(f"Error: {str(e)}")
         
         return StreamingResponse(
             event_generator(),
@@ -210,6 +214,7 @@ async def chat_stream(request: Request, body: ChatRequest):
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
             }
         )
         

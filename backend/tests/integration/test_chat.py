@@ -9,6 +9,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.models.schemas import ChatResponse
+from app.services.rag_engine import RAGEngine
 
 
 @pytest.fixture
@@ -148,6 +149,31 @@ class TestChatEndpoints:
         # Check if handoff suggestion is present when confidence is low
         if "suggest_handoff" in data:
             assert data["confidence"] < 0.5 or data["suggest_handoff"] == True
+
+
+@pytest.mark.parametrize("has_evidence", [False, True])
+async def test_chat_handoff_distinguishes_missing_evidence_from_hidden_citations(
+    client, mock_database, sample_site, has_evidence,
+):
+    mock_database.seed_site(sample_site)
+    mock_database.get_site_handoff_config = AsyncMock(return_value={
+        "enabled": True, "confidence_threshold": 0.3, "auto_suggest_phrases": [],
+    })
+    engine = RAGEngine.__new__(RAGEngine)
+    confidence = 0.9 if has_evidence else engine._calculate_confidence([])
+    result = ChatResponse(
+        answer="Câu trả lời đã được huấn luyện." if has_evidence else "Hiện mình chưa có đủ thông tin để trả lời.",
+        sources=[], confidence=confidence, session_id="handoff-evidence-session",
+    )
+    with patch("app.routes.chat.get_rag_engine") as get_engine:
+        get_engine.return_value.chat = AsyncMock(return_value=result)
+        response = await client.post("/api/chat", json={
+            "message": "Chính sách bảo hành?", "site_id": sample_site["site_id"], "session_id": result.session_id,
+        })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["suggest_handoff"] is (not has_evidence)
+    assert data["handoff_reason"] == (None if has_evidence else "low_confidence")
 
 
 class TestChatRateLimiting:

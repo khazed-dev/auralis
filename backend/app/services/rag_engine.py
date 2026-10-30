@@ -10,6 +10,7 @@ RAG Engine with all best practices:
 """
 import asyncio
 import re
+from contextlib import aclosing
 from typing import List, Dict, Optional, Tuple, AsyncGenerator
 from datetime import datetime
 from langchain_core.documents import Document
@@ -29,19 +30,112 @@ def _truncate_text(text: str, max_chars: int) -> str:
     return text[: max_chars - 1].rstrip() + "…"
 
 
+class _ModelOutputCleaner:
+    """Keep ambiguous marker prefixes buffered, not the complete response."""
+
+    _labels = ("analysis", "reasoning") + tuple(
+        f"chain{left}of{right}thought" for left in ("", "-", " ") for right in ("", "-", " ")
+    )
+
+    def __init__(self):
+        self._buffer = ""
+        self._think_depth = 0
+        self._prefix = []
+        self._line_start = True
+        self._after_label = False
+        self._started = False
+        self._whitespace = []
+
+    def _display(self, text: str, *, final: bool = False) -> str:
+        output = []
+
+        def emit(value):
+            for character in value:
+                if character.isspace():
+                    if self._started:
+                        self._whitespace.append(character)
+                else:
+                    output.append("".join(self._whitespace) + character)
+                    self._whitespace.clear()
+                    self._started = True
+
+        # Remove common reasoning labels if they accidentally appear.
+        for character in text:
+            if self._after_label:
+                if character.isspace():
+                    continue
+                self._after_label = False
+            if self._line_start:
+                self._prefix.append(character)
+                if character in "\r\n":
+                    emit(self._prefix)
+                    self._prefix.clear()
+                    continue
+                if character.isspace():
+                    continue
+                candidate = "".join(self._prefix).lstrip().casefold()
+                if re.fullmatch(r"(analysis|reasoning|chain[- ]?of[- ]?thought)\s*:", candidate):
+                    self._prefix.clear()
+                    self._after_label = True
+                    continue
+                if any(label.startswith(candidate.rstrip()) for label in self._labels):
+                    continue
+                emit(self._prefix)
+                self._prefix.clear()
+                self._line_start = False
+            else:
+                emit(character)
+                if character in "\r\n":
+                    self._line_start = True
+        if final:
+            emit(self._prefix)
+            self._prefix.clear()
+            self._whitespace.clear()
+        return "".join(output)
+
+    def feed(self, chunk: str) -> str:
+        buffer = self._buffer + chunk
+        self._buffer = ""
+        position = 0
+        output = []
+        # Remove Qwen/Qwen3 reasoning blocks if any.
+        while position < len(buffer):
+            marker = buffer.find("<", position)
+            if marker != position:
+                text = buffer[position:] if marker < 0 else buffer[position:marker]
+                if not self._think_depth:
+                    output.append(self._display(text))
+                if marker < 0:
+                    break
+                position = marker
+            lowered = buffer[position:position + 8].casefold()
+            if lowered.startswith("<think>"):
+                self._think_depth += 1
+                position += 7
+            elif lowered.startswith("</think>"):
+                self._think_depth = max(0, self._think_depth - 1)
+                position += 8
+            elif any(tag.startswith(lowered) for tag in ("<think>", "</think>")):
+                self._buffer = buffer[position:]
+                break
+            else:
+                if not self._think_depth:
+                    output.append(self._display("<"))
+                position += 1
+        return "".join(output)
+
+    def finish(self) -> str:
+        text = self._buffer if not self._think_depth else ""
+        self._buffer = ""
+        return self._display(text, final=True)
+
+
 def clean_model_output(text: str) -> str:
     """Clean model output before showing it to users."""
     if not text:
         return ""
-
-    # Remove Qwen/Qwen3 reasoning blocks if any.
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
-    text = text.replace("<think>", "").replace("</think>", "")
-
-    # Remove common reasoning labels if they accidentally appear.
-    text = re.sub(r"(?im)^\s*(analysis|reasoning|chain[- ]?of[- ]?thought)\s*:\s*", "", text)
-
-    return text.strip()
+    cleaner = _ModelOutputCleaner()
+    return cleaner.feed(text) + cleaner.finish()
 
 
 class RAGEngine:
@@ -248,6 +342,7 @@ class RAGEngine:
             
             # 5. Grade documents for relevance
             relevant_docs = await self._grade_documents(rewritten_query, retrieved_docs)
+            relevant_docs = relevant_docs[:settings.RETRIEVAL_K]
             
             # 6. Build context from relevant docs
             context, sources = self._build_context(relevant_docs)
@@ -304,7 +399,7 @@ class RAGEngine:
         user_id: str = None,
         site_id: str = None,
     ) -> AsyncGenerator[str, None]:
-        """Stream a chat response (history + retrieval run in parallel)."""
+        """Stream a chat response using the same trained Q&A path as normal chat."""
         mongodb = await get_mongodb()
 
         site_url_filter = None
@@ -318,7 +413,20 @@ class RAGEngine:
                 site_behavior = (site.get("config") or {}).get("behavior") or {}
 
         try:
-            history = await mongodb.get_conversation_history(session_id, site_id=site_id)
+            history, qa_match = await asyncio.gather(
+                mongodb.get_conversation_history(session_id, site_id=site_id),
+                self._check_qa_match(message, site_id),
+            )
+            if qa_match:
+                qa_pair, _qa_score = qa_match
+                answer = clean_model_output(qa_pair["answer"])
+                await mongodb.increment_qa_use_count(qa_pair["id"])
+                await mongodb.save_message(session_id=session_id, role="user", content=message, site_id=site_id)
+                await mongodb.save_message(session_id=session_id, role="assistant", content=answer, sources=[], site_id=site_id)
+                if answer:
+                    yield answer
+                return
+
             rewritten_query = await self._rewrite_query(message, history)
             retrieved_docs = await self._retrieve_documents(
                 rewritten_query,
@@ -326,6 +434,7 @@ class RAGEngine:
                 site_id=site_id,
             )
             relevant_docs = await self._grade_documents(rewritten_query, retrieved_docs)
+            relevant_docs = relevant_docs[:settings.RETRIEVAL_K]
             context, sources = self._build_context(relevant_docs)
 
             prompt = self._build_prompt(message, context, history)
@@ -334,18 +443,31 @@ class RAGEngine:
                 site_behavior.get("system_prompt"),
             )
 
-            full_response = ""
-            async for chunk in self.llm.generate_stream(
+            if user_id:
+                user_memory = await mongodb.get_user_memory(user_id)
+                if user_memory:
+                    system_prompt += f"\n\nUser preferences: {user_memory}"
+
+            cleaner = _ModelOutputCleaner()
+            visible_parts = []
+            async with aclosing(self.llm.generate_stream(
                 prompt,
                 system_prompt,
                 temperature=float(site_behavior.get("temperature", settings.LLM_TEMPERATURE)),
                 max_tokens=int(site_behavior.get("max_tokens", settings.LLM_MAX_TOKENS)),
-            ):
-                full_response += chunk
-
-            cleaned_response = clean_model_output(full_response)
-            if cleaned_response:
-                yield cleaned_response
+            )) as provider_stream:
+                async for chunk in provider_stream:
+                    visible = cleaner.feed(chunk)
+                    if visible:
+                        visible_parts.append(visible)
+                        yield visible
+            tail = cleaner.finish()
+            if tail:
+                visible_parts.append(tail)
+                yield tail
+            cleaned_response = "".join(visible_parts)
+            if site_behavior.get("show_sources") is False:
+                sources = []
 
             await mongodb.save_message(
                 session_id, "user", message, site_id=site_id
@@ -360,7 +482,7 @@ class RAGEngine:
             
         except Exception as e:
             logger.error(f"Streaming error: {e}")
-            yield f"\n\nError: {str(e)}"
+            raise
     
     async def _rewrite_query(
         self,
@@ -438,7 +560,8 @@ Rewritten search query (just the query, no explanation):"""
                 results = filtered_results
                 logger.info(f"Filtered to {len(results)} docs for site: {sf}")
             results.sort(key=lambda x: x[1])
-            return results[:k_val]
+            # Keep spare candidates so grading can replace rejected top hits.
+            return results[:k_val * oversample]
 
         return await asyncio.to_thread(_sync_retrieve)
     
@@ -667,17 +790,22 @@ Return only the questions, one per line, no numbering:"""
         self,
         docs: List[Tuple[Document, float]]
     ) -> float:
-        """Calculate confidence score based on document relevance."""
+        """Heuristic retrieval confidence, not a probability of answer correctness."""
         if not docs:
-            return 0.3  # Low confidence with no sources
-        
-        scores = [self._normalized_relevance(doc, score) for doc, score in docs]
-        avg_score = sum(scores) / len(scores)
-        
-        # Boost confidence if we have multiple sources
-        source_bonus = min(0.2, len(docs) * 0.05)
-        
-        return min(0.95, avg_score + source_bonus)
+            return 0.0  # No retrieved evidence; stay below positive handoff thresholds.
+
+        # Repeated content is not independent evidence, even under different URLs.
+        scores_by_content = {}
+        for doc, score in docs:
+            content = " ".join(doc.page_content.split())
+            if not content:
+                continue
+            relevance = self._normalized_relevance(doc, score)
+            scores_by_content[content] = max(scores_by_content.get(content, 0.0), relevance)
+
+        if not scores_by_content:
+            return 0.0
+        return min(0.95, sum(scores_by_content.values()) / len(scores_by_content))
 
 
 # Singleton instance

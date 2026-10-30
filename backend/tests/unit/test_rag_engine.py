@@ -3,9 +3,12 @@ Unit tests for RAG Engine service.
 Tests query rewriting, document retrieval, grading, and response generation.
 """
 import pytest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from langchain_core.documents import Document
 
+from app.config import settings
+from app.database.vector_store import VectorStore
 from app.services.rag_engine import RAGEngine, get_rag_engine
 
 
@@ -238,6 +241,92 @@ class TestRetrieveDocuments:
         assert scores == sorted(scores)
 
 
+class TestGradeBeforeTopK:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("hybrid", [True, False])
+    async def test_retrieval_keeps_bounded_oversampled_pool(self, rag_engine, monkeypatch, hybrid):
+        monkeypatch.setattr(settings, "RAG_HYBRID_SEARCH", hybrid)
+        monkeypatch.setattr(settings, "RAG_RETRIEVAL_OVERSAMPLE", 3)
+        candidates = [
+            (Document(page_content=f"Candidate {index}"), index / 10)
+            for index in range(8)
+        ]
+        search = rag_engine.vector_store.hybrid_search_with_score if hybrid else rag_engine.vector_store.similarity_search_with_score
+        search.return_value = candidates
+
+        results = await rag_engine._retrieve_documents("query", k=2)
+
+        assert results == candidates[:6]
+        assert search.call_args.kwargs["k"] == 6
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("flow", ["chat", "stream"])
+    @pytest.mark.parametrize("all_rejected", [False, True])
+    async def test_chat_grades_lower_ranked_candidates_before_limiting_context(
+        self, rag_engine, monkeypatch, flow, all_rejected,
+    ):
+        monkeypatch.setattr(settings, "RETRIEVAL_K", 2)
+        monkeypatch.setattr(settings, "RAG_RETRIEVAL_OVERSAMPLE", 3)
+        monkeypatch.setattr(settings, "RAG_HYBRID_SEARCH", True)
+        monkeypatch.setattr(settings, "RAG_DENSE_WEIGHT", 0.65)
+        monkeypatch.setattr(settings, "RAG_KEYWORD_WEIGHT", 0.35)
+        monkeypatch.setattr(settings, "RAG_MAX_DENSE_DISTANCE", 1.25)
+        query = "alpha beta gamma delta epsilon zeta eta theta iota kappa"
+        relevant = [
+            Document(
+                page_content=f"Coverage exceptions duration notice {index}",
+                metadata={"url": f"https://example.com/good-{index}", "site_id": "site-1"},
+            ) for index in range(4)
+        ]
+        distractors = [
+            Document(
+                page_content=f"alpha unrelated handbook {index}",
+                metadata={"url": f"https://example.com/bad-{index}", "site_id": "site-1"},
+            ) for index in range(2)
+        ]
+        documents = relevant + distractors
+        dense_results = [
+            (doc, 1.8 if all_rejected else 1.0 + index / 100)
+            for index, doc in enumerate(relevant)
+        ] + [(doc, 1.9) for doc in distractors]
+        store = VectorStore.__new__(VectorStore)
+        store._initialized = True
+        store.vector_store = SimpleNamespace(
+            index=SimpleNamespace(ntotal=len(documents)),
+            docstore=SimpleNamespace(_dict={str(index): doc for index, doc in enumerate(documents)}),
+            similarity_search_with_score=lambda _query, k: dense_results[:k],
+        )
+        rag_engine.vector_store = store
+        # Real hybrid fusion ranks weak lexical hits ahead of the semantic hits.
+        ranked = store.hybrid_search_with_score(query, k=6, filter={"site_id": "site-1"})
+        if not all_rejected:
+            assert all("/bad-" in doc.metadata["url"] for doc, _ in ranked[:2])
+
+        database = MagicMock()
+        database.db.sites.find_one = AsyncMock(return_value={"url": "https://example.com", "name": "Fixture"})
+        database.get_conversation_history = AsyncMock(return_value=[])
+        database.get_qa_for_rag = AsyncMock(return_value=[])
+        database.save_message = AsyncMock()
+        monkeypatch.setattr("app.services.rag_engine.get_mongodb", AsyncMock(return_value=database))
+        rag_engine._build_context = MagicMock(wraps=rag_engine._build_context)
+
+        async def generate_stream(*_args, **_kwargs):
+            yield "Generated response"
+
+        if flow == "stream":
+            rag_engine.llm.generate_stream = generate_stream
+            output = [part async for part in rag_engine.chat_stream(query, "session", site_id="site-1")]
+            assert output == ["Generated response"]
+        else:
+            response = await rag_engine.chat(query, "session", site_id="site-1")
+            assert response.answer == "Generated response"
+
+        selected = rag_engine._build_context.call_args.args[0]
+        expected_urls = [] if all_rejected else ["https://example.com/good-0", "https://example.com/good-1"]
+        assert [doc.metadata["url"] for doc, _ in selected] == expected_urls
+        assert len(selected) <= settings.RETRIEVAL_K
+
+
 # ==================== _grade_documents Tests ====================
 
 class TestGradeDocuments:
@@ -438,7 +527,7 @@ class TestCalculateConfidence:
     def test_calculate_confidence_no_docs(self, rag_engine):
         """Should return low confidence with no documents."""
         confidence = rag_engine._calculate_confidence([])
-        assert confidence == 0.3
+        assert confidence == 0.0
     
     def test_calculate_confidence_high_relevance(self, rag_engine):
         """Should return high confidence with highly relevant docs."""
@@ -462,20 +551,45 @@ class TestCalculateConfidence:
         
         assert confidence < 0.5
     
-    def test_calculate_confidence_source_bonus(self, rag_engine):
-        """More sources should increase confidence."""
-        single_doc = [(Document(page_content="Content"), 0.5)]
+    @pytest.mark.parametrize("same_source", [True, False])
+    def test_calculate_confidence_does_not_reward_source_count(self, rag_engine, same_source):
+        """Adding equally relevant chunks or URLs does not itself improve confidence."""
+        single_doc = [(Document(page_content="Content 0", metadata={"url": "https://example.com/0"}), 0.5)]
         multiple_docs = [
-            (Document(page_content="Content"), 0.5),
-            (Document(page_content="Content"), 0.5),
-            (Document(page_content="Content"), 0.5),
-            (Document(page_content="Content"), 0.5),
+            (Document(page_content=f"Content {index}", metadata={"url": f"https://example.com/{0 if same_source else index}"}), 0.5)
+            for index in range(4)
         ]
         
         single_confidence = rag_engine._calculate_confidence(single_doc)
         multi_confidence = rag_engine._calculate_confidence(multiple_docs)
         
-        assert multi_confidence > single_confidence
+        assert multi_confidence == pytest.approx(single_confidence)
+
+    @pytest.mark.parametrize("same_source", [True, False])
+    def test_calculate_confidence_ignores_duplicate_content(self, rag_engine, same_source):
+        strong = (Document(page_content="Warranty covers two years.", metadata={"url": "https://example.com/warranty"}), 0.2)
+        weak = (Document(page_content="Replacement needs an invoice.", metadata={"url": "https://example.com/returns"}), 1.2)
+        copies = [
+            (Document(page_content="  Warranty covers\n two years.  ", metadata={"url": "https://example.com/warranty" if same_source else f"https://mirror-{index}.example/policy"}), 0.2)
+            for index in range(4)
+        ]
+
+        expected = rag_engine._calculate_confidence([strong, weak])
+        assert rag_engine._calculate_confidence([strong, weak, *copies]) == pytest.approx(expected)
+
+    def test_calculate_confidence_keeps_best_duplicate_regardless_of_order(self, rag_engine):
+        strong = (Document(page_content="Same policy"), 0.2)
+        weaker_copy = (Document(page_content="Same policy"), 1.8)
+        other = (Document(page_content="Other policy"), 1.2)
+
+        expected = rag_engine._calculate_confidence([strong, other])
+        assert rag_engine._calculate_confidence([weaker_copy, strong, other]) == pytest.approx(expected)
+        assert rag_engine._calculate_confidence([other, strong, weaker_copy]) == pytest.approx(expected)
+
+    def test_calculate_confidence_ignores_empty_content(self, rag_engine):
+        empty = [(Document(page_content=" \n\t ", metadata={"url": f"https://example.com/{index}"}), 0.0) for index in range(4)]
+
+        assert rag_engine._calculate_confidence(empty) == rag_engine._calculate_confidence([])
     
     def test_calculate_confidence_max_cap(self, rag_engine):
         """Confidence should never exceed 0.95."""
