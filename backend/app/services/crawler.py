@@ -95,7 +95,7 @@ class CrawlerService:
                 "Cache-Control": "no-cache",
             }
         ) as session:
-            while queue and len(self.pages) < max_pages:
+            while queue and len(self.pages) < max_pages and len(self.visited_urls) < max_pages:
                 if self.job_id:
                     mongodb = await get_mongodb()
                     job = await mongodb.get_crawl_job(self.job_id)
@@ -110,8 +110,12 @@ class CrawlerService:
                     continue
                 
                 # Check patterns
-                if not self._should_crawl(url, include_regex, exclude_regex):
-                    continue
+                matches_patterns = self._should_crawl(url, include_regex, exclude_regex)
+                if not matches_patterns:
+                    # Fetch the starting page to discover links even when only
+                    # a subsection is included; explicit exclusions still win.
+                    if url != start_url or not self._should_crawl(url, None, exclude_regex):
+                        continue
                 
                 self.visited_urls.add(url)
                 
@@ -120,7 +124,8 @@ class CrawlerService:
                     page_data = await self._fetch_page(session, url)
                     
                     if page_data:
-                        self.pages.append(page_data)
+                        if matches_patterns:
+                            self.pages.append(page_data)
                         
                         # Extract links and add to queue
                         links = self._extract_links(page_data["html"], base_domain, url)

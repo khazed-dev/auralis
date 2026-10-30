@@ -18,7 +18,8 @@ from app.models.schemas import (
     CrawlScheduleUpdate,
     CrawlScheduleResponse,
     CrawlHistoryResponse,
-    CrawlHistoryItem
+    CrawlHistoryItem,
+    ManualCrawlOptions,
 )
 from app.services.subscriptions import enforce_quota, increment_usage
 
@@ -35,6 +36,11 @@ async def handle_queued_crawl(job_id: str, payload: dict) -> None:
     """Dispatch a durable queue payload to the existing crawl executors."""
     db = await get_mongodb()
     site = await db.get_site(payload["site_id"])
+    if payload.get("action") == "index_pending":
+        if not site:
+            raise RuntimeError("Site no longer exists")
+        await _run_pending_index_background(job_id, payload["site_id"])
+        return
     owner_id = str((site or {}).get("user_id") or "")
     requested_pages = int(payload.get("max_pages") or 50)
     if owner_id:
@@ -46,6 +52,7 @@ async def handle_queued_crawl(job_id: str, payload: dict) -> None:
         "max_pages": int(payload.get("max_pages") or 50),
         "include_patterns": payload.get("include_patterns") or [],
         "exclude_patterns": payload.get("exclude_patterns") or [],
+        "max_index_pages": payload.get("max_index_pages"),
     }
     if payload.get("action") == "incremental":
         await _run_incremental_crawl_background(**kwargs)
@@ -227,9 +234,28 @@ async def update_crawl_schedule(
     )
 
 
+def _manual_crawl_options(schedule_config: dict, options: Optional[ManualCrawlOptions], incremental: bool = False) -> dict:
+    options = options or ManualCrawlOptions()
+    default_pages = schedule_config.get("max_pages", 50)
+    if incremental:
+        default_pages = max(default_pages, settings.INCREMENTAL_SCAN_MAX_PAGES)
+    max_pages = options.max_pages if options.max_pages is not None else default_pages
+    default_index = min(max_pages, settings.INCREMENTAL_MAX_NEW_PAGES) if incremental else max_pages
+    max_index_pages = options.max_index_pages if options.max_index_pages is not None else default_index
+    if max_index_pages > max_pages:
+        raise HTTPException(status_code=422, detail="Số trang lập chỉ mục không được vượt số trang quét.")
+    return {
+        "max_pages": max_pages,
+        "max_index_pages": max_index_pages,
+        "include_patterns": options.include_patterns if options.include_patterns is not None else schedule_config.get("include_patterns", []),
+        "exclude_patterns": options.exclude_patterns if options.exclude_patterns is not None else schedule_config.get("exclude_patterns", []),
+    }
+
+
 @router.post("/api/sites/{site_id}/crawl-now")
 async def trigger_crawl_now(
     site_id: str,
+    options: Optional[ManualCrawlOptions] = None,
     current_user: dict = Depends(require_site_manage)
 ):
     """Trigger an immediate crawl for a site."""
@@ -249,9 +275,7 @@ async def trigger_crawl_now(
     site_url = site.get("url")
     schedule_config = await db.get_crawl_schedule(site_id) or {}
     
-    max_pages = schedule_config.get("max_pages", 50)
-    include_patterns = schedule_config.get("include_patterns", [])
-    exclude_patterns = schedule_config.get("exclude_patterns", [])
+    crawl_options = _manual_crawl_options(schedule_config, options)
     
     job_id = await db.create_scheduled_crawl_job(
         site_id=site_id,
@@ -263,9 +287,7 @@ async def trigger_crawl_now(
         "action": "full",
         "site_url": site_url,
         "site_id": site_id,
-        "max_pages": max_pages,
-        "include_patterns": include_patterns,
-        "exclude_patterns": exclude_patterns,
+        **crawl_options,
     })
     
     return {
@@ -278,6 +300,7 @@ async def trigger_crawl_now(
 @router.post("/api/sites/{site_id}/crawl-new")
 async def trigger_incremental_crawl(
     site_id: str,
+    options: Optional[ManualCrawlOptions] = None,
     current_user: dict = Depends(require_site_manage)
 ):
     """Crawl the site but index only URLs that are not already stored."""
@@ -294,6 +317,7 @@ async def trigger_incremental_crawl(
         )
 
     schedule_config = await db.get_crawl_schedule(site_id) or {}
+    crawl_options = _manual_crawl_options(schedule_config, options, incremental=True)
     job_id = await db.create_scheduled_crawl_job(
         site_id=site_id,
         target_url=site.get("url"),
@@ -303,12 +327,7 @@ async def trigger_incremental_crawl(
         "action": "incremental",
         "site_url": site.get("url"),
         "site_id": site_id,
-        "max_pages": max(
-            schedule_config.get("max_pages", 50),
-            settings.INCREMENTAL_SCAN_MAX_PAGES
-        ),
-        "include_patterns": schedule_config.get("include_patterns", []),
-        "exclude_patterns": schedule_config.get("exclude_patterns", []),
+        **crawl_options,
     })
     return {
         "success": True,
@@ -323,7 +342,8 @@ async def _run_incremental_crawl_background(
     site_id: str,
     max_pages: int,
     include_patterns: list,
-    exclude_patterns: list
+    exclude_patterns: list,
+    max_index_pages: Optional[int] = None,
 ):
     """Discover all in-scope pages and index only URLs not seen before."""
     from bson import ObjectId
@@ -337,7 +357,8 @@ async def _run_incremental_crawl_background(
             start_url=site_url,
             max_pages=max_pages,
             include_patterns=include_patterns,
-            exclude_patterns=exclude_patterns
+            exclude_patterns=exclude_patterns,
+            job_id=job_id,
         )
         if not pages:
             errors = crawler.get_stats().get("error_messages") or []
@@ -356,14 +377,17 @@ async def _run_incremental_crawl_background(
             page for page in (pages or [])
             if page.get("url") and page["url"] not in existing_urls
         ]
-        new_pages = discovered_new_pages[:settings.INCREMENTAL_MAX_NEW_PAGES]
+        await _store_pending_pages(db, site_id, discovered_new_pages, job_id)
+        index_limit = max_index_pages if max_index_pages is not None else settings.INCREMENTAL_MAX_NEW_PAGES
+        new_pages = discovered_new_pages[:index_limit]
 
         indexed_count = 0
         if new_pages:
             indexer = IndexerService()
-            stats = await indexer.index_pages(new_pages, site_id=site_id)
+            stats = await indexer.index_pages(new_pages, site_id=site_id, job_id=job_id)
             indexed_count = stats.get("indexed_pages", 0)
 
+        await _raise_if_crawl_cancelled(db, job_id)
         await db.update_crawl_job(
             job_id=job_id,
             status="completed",
@@ -377,7 +401,7 @@ async def _run_incremental_crawl_background(
                 "pages_discovered": len(pages) if pages else 0,
                 "new_pages_found": len(discovered_new_pages),
                 "new_pages_indexed": indexed_count,
-                "new_pages_limit": settings.INCREMENTAL_MAX_NEW_PAGES
+                "new_pages_limit": index_limit
             }}
         )
         logger.info(
@@ -402,7 +426,8 @@ async def _run_crawl_background(
     site_id: str,
     max_pages: int,
     include_patterns: list,
-    exclude_patterns: list
+    exclude_patterns: list,
+    max_index_pages: Optional[int] = None,
 ):
     """Background task to run the crawl."""
     from bson import ObjectId
@@ -416,7 +441,8 @@ async def _run_crawl_background(
             start_url=site_url,
             max_pages=max_pages,
             include_patterns=include_patterns,
-            exclude_patterns=exclude_patterns
+            exclude_patterns=exclude_patterns,
+            job_id=job_id,
         )
         if not pages:
             errors = crawler.get_stats().get("error_messages") or []
@@ -426,9 +452,12 @@ async def _run_crawl_background(
         indexed_count = 0
         if pages:
             indexer = IndexerService()
-            stats = await indexer.index_pages(pages, site_id=site_id)
+            await _store_pending_pages(db, site_id, pages, job_id)
+            index_pages = pages[:max_index_pages] if max_index_pages is not None else pages
+            stats = await indexer.index_pages(index_pages, site_id=site_id, job_id=job_id)
             indexed_count = stats.get("indexed_pages", 0)
         
+        await _raise_if_crawl_cancelled(db, job_id)
         await db.update_crawl_job(
             job_id=job_id,
             status="completed",
@@ -452,6 +481,87 @@ async def _run_crawl_background(
             status="failed",
             error=str(e)
         )
+
+
+def _pending_pages_filter(site_id: str) -> dict:
+    return {"site_id": site_id, "status": {"$ne": "indexed"}, "content": {"$type": "string", "$ne": ""}}
+
+
+async def _store_pending_pages(db, site_id: str, pages: list, job_id: str) -> None:
+    """Keep unindexed crawl content without replacing an existing indexed page."""
+    for page in pages:
+        if not page.get("url") or len(page.get("content") or "") < 50:
+            continue
+        await _raise_if_crawl_cancelled(db, job_id)
+        identity = {"site_id": site_id, "url": page["url"]}
+        fields = {
+            "title": page.get("title") or "",
+            "content": page["content"],
+            "metadata": {**(page.get("metadata") or {}), "site_id": site_id},
+            "status": "pending",
+            "chunk_count": 0,
+            "last_crawled": datetime.utcnow(),
+        }
+        # First create a missing row, then update only rows still unindexed.
+        # The conditional update also protects a page indexed concurrently.
+        await db.db.pages.update_one(identity, {"$setOnInsert": {**fields, "created_at": datetime.utcnow()}}, upsert=True)
+        await db.db.pages.update_one({**identity, "status": {"$ne": "indexed"}}, {"$set": fields})
+
+
+@router.get("/api/sites/{site_id}/index-status")
+async def get_index_status(site_id: str, current_user: dict = Depends(require_site_view)):
+    db = await get_mongodb()
+    pending = await db.db.pages.count_documents(_pending_pages_filter(site_id))
+    indexed = await db.db.pages.count_documents({"site_id": site_id, "status": "indexed"})
+    return {"pending_pages": pending, "indexed_pages": indexed}
+
+
+@router.post("/api/sites/{site_id}/index-pending")
+async def index_pending_pages(site_id: str, current_user: dict = Depends(require_site_manage)):
+    db = await get_mongodb()
+    site = await db.get_site(site_id)
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    if await db.get_running_crawl_job(site_id):
+        raise HTTPException(status_code=409, detail="Website đang có tác vụ chạy. Hãy chờ hoàn tất hoặc dừng tác vụ.")
+    count = await db.db.pages.count_documents(_pending_pages_filter(site_id))
+    if not count:
+        raise HTTPException(status_code=409, detail="Không có trang nào đang chờ lập chỉ mục.")
+    job_id = await db.create_scheduled_crawl_job(site_id, site["url"], "index_pending")
+    await get_crawl_queue().enqueue(job_id, {"action": "index_pending", "site_id": site_id})
+    return {"success": True, "job_id": job_id, "pending_pages": count}
+
+
+async def _run_pending_index_background(job_id: str, site_id: str) -> None:
+    """Index saved pages only; no HTTP crawl and no second crawl usage charge."""
+    from bson import ObjectId
+
+    db = await get_mongodb()
+    indexed_count = 0
+    failed = False
+    cursor = db.db.pages.find(_pending_pages_filter(site_id)).sort("_id", 1)
+    try:
+        indexer = IndexerService()
+        async for page in cursor:
+            await _raise_if_crawl_cancelled(db, job_id)
+            stats = await indexer.index_pages([page], site_id=site_id)
+            indexed_count += stats.get("indexed_pages", 0)
+            if not stats.get("indexed_pages"):
+                failed = True
+                errors = stats.get("errors") or [f"Không thể lập chỉ mục: {page.get('url', '')}"]
+                for error in errors:
+                    await db.update_crawl_job(job_id, error=error)
+            await db.update_crawl_job(job_id, pages_indexed=indexed_count)
+        await _raise_if_crawl_cancelled(db, job_id)
+        await db.update_crawl_job(job_id, status="failed" if failed else "completed", pages_crawled=0, pages_indexed=indexed_count)
+        await db.db.crawl_jobs.update_one({"_id": ObjectId(job_id)}, {"$set": {"completed_at": datetime.utcnow()}})
+    except CrawlCancelled:
+        logger.info(f"Pending index job {job_id} cancelled")
+    except Exception as exc:
+        logger.exception(f"Pending index job {job_id} failed")
+        await db.update_crawl_job(job_id, status="failed", error=str(exc))
+    finally:
+        await cursor.close()
 
 
 @router.get("/api/sites/{site_id}/crawl-history", response_model=CrawlHistoryResponse)
@@ -498,6 +608,8 @@ async def get_crawl_status(
             "job_id": running_job.get("_id"),
             "status": running_job.get("status"),
             "pages_crawled": running_job.get("pages_crawled", 0),
+            "pages_indexed": running_job.get("pages_indexed", 0),
+            "trigger": running_job.get("trigger", "manual"),
             "started_at": running_job.get("created_at")
         }
     
@@ -524,10 +636,7 @@ async def cancel_site_crawl(
     now = datetime.utcnow()
     result = await db.db.crawl_jobs.update_many(
         {
-            "$or": [
-                {"site_id": site_id},
-                {"target_url": site.get("url")},
-            ],
+            "site_id": site_id,
             "status": {"$in": ["queued", "running"]},
         },
         {
