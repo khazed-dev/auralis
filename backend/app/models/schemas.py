@@ -2,9 +2,10 @@
 Pydantic models for API request/response schemas.
 """
 import uuid
+import re
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ==================== Chat Models ====================
@@ -684,6 +685,27 @@ class HandoffAvailabilityResponse(BaseModel):
 
 
 # ==================== Crawl Schedule Models ====================
+
+class ManualCrawlOptions(BaseModel):
+    """Per-run limits; omitted values retain the existing site defaults."""
+    max_pages: Optional[int] = Field(default=None, ge=1, le=1000)
+    max_index_pages: Optional[int] = Field(default=None, ge=1, le=1000)
+    include_patterns: Optional[List[str]] = Field(default=None, max_length=50)
+    exclude_patterns: Optional[List[str]] = Field(default=None, max_length=50)
+
+    @field_validator("include_patterns", "exclude_patterns")
+    @classmethod
+    def validate_patterns(cls, patterns):
+        if patterns is not None:
+            for pattern in patterns:
+                if not pattern.strip() or len(pattern) > 500:
+                    raise ValueError("URL patterns must contain 1–500 characters")
+                try:
+                    re.compile(pattern)
+                except re.error as exc:
+                    raise ValueError(f"Invalid URL pattern: {pattern}") from exc
+        return patterns
+
 
 class CrawlScheduleConfig(BaseModel):
     """Configuration for scheduled re-crawling of a site."""

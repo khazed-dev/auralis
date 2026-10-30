@@ -157,6 +157,25 @@
 .workspace :global(.document-upload-form) input { min-width: 0; }
 .workspace :global(.crawl-running-banner) { margin: 24px 28px 0; padding: 18px; background: #edf6f2; border: 1px solid #d1e7de; color: #2e6653; border-radius: 9px; }
 .workspace :global(.crawl-actions) button { background: #edf4f2; border-color: #cdded7; color: #2a584a; border-radius: 7px; min-height: 42px; }
+.workspace :global(.crawl-tabs) { display: flex; gap: 6px; padding: 18px 28px 0; border-bottom: 1px solid var(--auralis-line); overflow-x: auto; }
+.workspace :global(.crawl-tabs) button { padding: 10px 16px 12px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--auralis-muted); font-weight: 600; cursor: pointer; }
+.workspace :global(.crawl-tabs) button[aria-selected="true"] { color: #245f50; border-bottom-color: #28775f; }
+.workspace :global(.crawl-tab-panel)[hidden] { display: none; }
+.workspace :global(.crawl-tab-panel) > form > section, .workspace :global(.crawl-tab-panel) > section { padding: 24px 28px; border-bottom: 1px solid var(--auralis-line); }
+.workspace :global(.crawl-tabs) button { white-space: nowrap; }
+.workspace :global(.crawl-index-summary) { display: flex; flex-wrap: wrap; gap: 24px 48px; padding: 20px 0 24px; }
+.workspace :global(.crawl-index-summary) > div { display: flex; flex-direction: column; gap: 4px; }
+.workspace :global(.crawl-index-summary) span { color: var(--auralis-muted); font-size: 13px; }
+.workspace :global(.crawl-index-summary) strong { font-size: 28px; color: var(--auralis-ink); }
+.workspace :global(.crawl-tab-panel) fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+.workspace :global(.crawl-tab-panel) :global(.site-config-checkbox) { margin-bottom: 20px; }
+.workspace :global(.crawl-url-filters) { margin-top: 24px; border-top: 1px solid var(--auralis-line); padding-top: 16px; }
+.workspace :global(.crawl-url-filters) summary { cursor: pointer; color: var(--auralis-ink); font-weight: 600; }
+.workspace :global(.crawl-url-filters)[open] summary { margin-bottom: 18px; }
+.workspace :global(.crawl-submit-row) { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 20px; margin-top: 24px; }
+.workspace :global(.crawl-submit-row) small { color: var(--auralis-muted); max-width: 390px; }
+.workspace :global(.crawl-action-message) { margin: 18px 28px 0; color: var(--auralis-ink); overflow-wrap: anywhere; }
+.workspace :global(.crawl-tab-panel) :global(.site-config-grid) { margin-bottom: 20px; }
 .workspace :global(.embed-code-header) { background: #eaf1f1; color: var(--auralis-ink); }
 .workspace :global(.embed-panel) pre { background: var(--auralis-panel); color: #d9efec; border-color: #254550; font-size: 12px; line-height: 1.9; padding: 20px; }
 .workspace :global(.sri-box) { overflow-wrap: anywhere; color: var(--auralis-muted); background: var(--auralis-paper); }
@@ -388,6 +407,10 @@
   .workspace :global(.qa-list) article > div { flex-basis: 100%; }
   .workspace :global(.management-list) article { gap: 10px; padding: 14px; }
   .workspace :global(.crawl-running-banner) { margin: 18px 18px 0; flex-wrap: wrap; }
+  .workspace :global(.crawl-tabs) { padding: 12px 18px 0; }
+  .workspace :global(.crawl-tabs) button { padding-inline: 6px; font-size: 12px; flex: 1; }
+  .workspace :global(.crawl-tab-panel) > form > section, .workspace :global(.crawl-tab-panel) > section { padding: 22px 18px; }
+  .workspace :global(.crawl-action-message) { margin-inline: 18px; }
   .workspace :global(.conversation-filters) { display: grid; grid-template-columns: minmax(0, 1fr); }
   .workspace :global(.conversation-filters) form { width: 100%; min-width: 0; }
   .workspace :global(.conversation-detail-header), .workspace :global(.handoff-detail-header) { padding: 16px; flex-wrap: wrap; gap: 12px; }
